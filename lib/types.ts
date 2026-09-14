@@ -38,6 +38,7 @@ export interface Room {
     playback_state: PlaybackState;
     playback_position_ms: number;
     last_sync_timestamp: string;
+    session_started_at: string | null;
     created_at: string;
     host?: User;
     current_track?: Track;
@@ -69,6 +70,7 @@ export type WSEventType =
     | "INITIAL_STATE"
     | "ROOM_CLOSED"
     | "LEAVE_ROOM"
+    | "SESSION_STARTED"
     | "ERROR";
 
 export interface WSMessage<T = unknown> {

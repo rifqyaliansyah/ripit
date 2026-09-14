@@ -1,22 +1,36 @@
 "use client";
+
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { RoomMember } from "@/lib/types";
 import { getUser } from "@/lib/api";
+import ConfirmationModal from "@/components/ui/ConfirmationModal";
 
 interface RoomMembersProps {
   members: RoomMember[];
   roomCode: string;
   currentHostId?: string;
+  leaveRoom: () => void;
 }
 
-export default function RoomMembers({ members, roomCode, currentHostId }: RoomMembersProps) {
+export default function RoomMembers({ members, roomCode, currentHostId, leaveRoom }: RoomMembersProps) {
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
   const currentUser = getUser();
+
+  const isHost = currentUser?.id === currentHostId;
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleConfirmLeave = () => {
+    leaveRoom();
+    setShowLeaveModal(false);
+    router.push("/");
   };
 
   const sortedMembers = [...members].sort((a, b) => {
@@ -60,7 +74,7 @@ export default function RoomMembers({ members, roomCode, currentHostId }: RoomMe
         {/* Member list */}
         <div className="flex flex-col divide-y divide-[#E5DDD3] overflow-y-auto flex-1">
           {sortedMembers.map((m) => {
-            const isHost = m.role === "host" || m.user_id === currentHostId;
+            const memberIsHost = m.role === "host" || m.user_id === currentHostId;
             const username = m.user?.username || "Unknown";
             const isYou = m.user_id === currentUser?.id;
 
@@ -75,7 +89,7 @@ export default function RoomMembers({ members, roomCode, currentHostId }: RoomMe
                       {username}
                       {isYou && " (you)"}
                     </span>
-                    {isHost && (
+                    {memberIsHost && (
                       <span className="font-label-sm text-label-sm text-[#7A7672]">
                         host
                       </span>
@@ -87,6 +101,32 @@ export default function RoomMembers({ members, roomCode, currentHostId }: RoomMe
           })}
         </div>
       </div>
+
+      {/* Leave button — pinned at the bottom */}
+      <div className="pt-space-md shrink-0">
+        <button
+          type="button"
+          onClick={() => setShowLeaveModal(true)}
+          className="w-full py-space-md px-space-lg rounded-lg bg-surface-dim hover:bg-surface-variant active:bg-[#c8c2be] border border-[#c4beba] text-on-surface font-title-sm text-title-sm transition-colors cursor-pointer select-none text-center shadow-xs"
+        >
+          Leave Room
+        </button>
+      </div>
+
+      <ConfirmationModal
+        isOpen={showLeaveModal}
+        title="Leave room?"
+        subtitle={
+          isHost
+            ? "Leaving now will close the room for everyone. This session will end."
+            : "Are you sure you want to leave this listening session?"
+        }
+        confirmText="Leave"
+        cancelText="Stay"
+        isDestructive={true}
+        onConfirm={handleConfirmLeave}
+        onCancel={() => setShowLeaveModal(false)}
+      />
     </aside>
   );
 }

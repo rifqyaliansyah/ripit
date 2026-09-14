@@ -92,6 +92,11 @@ export function RoomSocketProvider({
                         onRoomClosedRef.current?.();
                         break;
                     }
+                    case "SESSION_STARTED": {
+                        const payload = msg.payload as { session_started_at: string };
+                        setRoom((prev) => (prev ? { ...prev, session_started_at: payload.session_started_at } : prev));
+                        break;
+                    }
                 }
             }
         };

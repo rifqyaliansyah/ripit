@@ -1,10 +1,25 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { RoomSocketProvider } from "@/lib/RoomSocketContext";
+import { usePathname, useRouter } from "next/navigation";
+import { RoomSocketProvider, useRoomSocketContext } from "@/lib/RoomSocketContext";
 import { getRoomByCode, getToken, getUser } from "@/lib/api";
 import type { Room } from "@/lib/types";
+
+function RoomSessionGate({ roomCode }: { roomCode: string }) {
+    const { room } = useRoomSocketContext();
+    const pathname = usePathname();
+    const router = useRouter();
+
+    useEffect(() => {
+        const onSetupPage = pathname.endsWith("/setup");
+        if (room?.session_started_at && onSetupPage) {
+            router.replace(`/room/${roomCode}`);
+        }
+    }, [room?.session_started_at, pathname, roomCode, router]);
+
+    return null;
+}
 
 export default function RoomLayout({
     children,
@@ -43,6 +58,7 @@ export default function RoomLayout({
             initialRoom={room}
             onRoomClosed={() => router.replace("/")}
         >
+            <RoomSessionGate roomCode={roomCode} />
             {children}
         </RoomSocketProvider>
     );

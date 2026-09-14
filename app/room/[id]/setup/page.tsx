@@ -10,7 +10,7 @@ import { getUser } from "@/lib/api";
 
 export default function RoomSetupPage() {
   const router = useRouter();
-  const { room, members, leaveRoom } = useRoomSocketContext();
+  const { room, members, send, leaveRoom } = useRoomSocketContext();
   const [showLeaveModal, setShowLeaveModal] = useState(false);
 
   const currentUser = getUser();
@@ -34,6 +34,7 @@ export default function RoomSetupPage() {
   }));
 
   const handleStartSession = () => {
+    send({ type: "SESSION_STARTED", payload: {} });
     router.push(`/room/${roomCode}`);
   };
 

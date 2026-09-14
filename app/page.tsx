@@ -60,11 +60,13 @@ export default function EntryScreen() {
         );
       } else if (modalMode === "join") {
         const code = joinCode.trim().toUpperCase();
-        await joinRoomByCode(code);
+        const res = await joinRoomByCode(code);
         setModalMode(null);
-        router.push(
-          `/room/${code}/setup?role=joiner&name=${encodeURIComponent(name)}`
-        );
+
+        const destination = res.room.session_started_at
+          ? `/room/${code}`
+          : `/room/${code}/setup?role=joiner&name=${encodeURIComponent(name)}`;
+        router.push(destination);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";

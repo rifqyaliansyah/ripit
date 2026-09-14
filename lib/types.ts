@@ -68,6 +68,7 @@ export type WSEventType =
     | "USER_LEFT"
     | "INITIAL_STATE"
     | "ROOM_CLOSED"
+    | "LEAVE_ROOM"
     | "ERROR";
 
 export interface WSMessage<T = unknown> {

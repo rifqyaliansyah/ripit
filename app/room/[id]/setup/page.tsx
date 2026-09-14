@@ -1,58 +1,21 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import WaitingCodeCard from "@/components/room/WaitingCodeCard";
 import WaitingParticipantList from "@/components/room/WaitingParticipantList";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
-import { getRoomByCode, getToken, getUser } from "@/lib/api";
-import { useRoomSocket } from "@/lib/useRoomSocket";
-import type { Room } from "@/lib/types";
+import { useRoomSocketContext } from "@/lib/RoomSocketContext";
+import { getUser } from "@/lib/api";
 
-export default function RoomSetupPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const resolvedParams = use(params);
+export default function RoomSetupPage() {
   const router = useRouter();
-  const roomCode = resolvedParams.id.toUpperCase();
-
-  const [room, setRoom] = useState<Room | null>(null);
-  const [error, setError] = useState("");
+  const { room, members, leaveRoom } = useRoomSocketContext();
   const [showLeaveModal, setShowLeaveModal] = useState(false);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const token = getToken();
-    const user = getUser();
-
-    if (!token || !user) {
-      router.replace("/");
-      return;
-    }
-
-    getRoomByCode(roomCode)
-      .then((data) => {
-        setRoom(data);
-        setReady(true);
-      })
-      .catch(() => {
-        router.replace("/");
-      });
-  }, [roomCode, router]);
-
-  const handleRoomClosed = () => {
-    router.replace("/");
-  };
-
-  const { members } = useRoomSocket({
-    roomId: room?.id || null,
-    onRoomClosed: handleRoomClosed,
-  });
 
   const currentUser = getUser();
   const isHost = room?.host_id === currentUser?.id;
+  const roomCode = room?.room_code?.toUpperCase() ?? "";
 
   const sortedMembers = [...members].sort((a, b) => {
     if (a.role === "host" && b.role !== "host") return -1;
@@ -75,13 +38,10 @@ export default function RoomSetupPage({
   };
 
   const handleConfirmLeave = () => {
+    leaveRoom(); // kirim LEAVE_ROOM eksplisit sebelum socket ditutup
     setShowLeaveModal(false);
     router.push("/");
   };
-
-  if (!ready || !room) {
-    return null;
-  }
 
   return (
     <main className="w-full bg-background font-body-md text-on-surface min-h-screen">
@@ -99,12 +59,6 @@ export default function RoomSetupPage({
                 {isHost ? "room setup & partner invite" : "waiting for session to start"}
               </p>
             </header>
-
-            {error && (
-              <div className="w-full mb-space-lg p-space-md rounded-lg bg-red-50 border border-red-200 text-red-600 text-body-sm">
-                {error}
-              </div>
-            )}
 
             <div className="w-full flex flex-col gap-space-xl">
               <WaitingCodeCard

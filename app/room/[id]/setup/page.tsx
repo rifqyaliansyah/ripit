@@ -1,10 +1,13 @@
 "use client";
 
-import { use, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { use, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import WaitingCodeCard from "@/components/room/WaitingCodeCard";
 import WaitingParticipantList from "@/components/room/WaitingParticipantList";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
+import { getRoomByCode, getToken, getUser } from "@/lib/api";
+import { useRoomSocket } from "@/lib/useRoomSocket";
+import type { Room } from "@/lib/types";
 
 export default function RoomSetupPage({
   params,
@@ -13,68 +16,62 @@ export default function RoomSetupPage({
 }) {
   const resolvedParams = use(params);
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const roomCode = resolvedParams.id.toUpperCase();
 
-  const role = searchParams.get("role") || "host";
-  const userName = searchParams.get("name") || (role === "host" ? "Maya" : "Alex");
-  const isHost = role === "host";
-
-  const [currentCode, setCurrentCode] = useState(resolvedParams.id.toUpperCase());
+  const [room, setRoom] = useState<Room | null>(null);
+  const [error, setError] = useState("");
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [ready, setReady] = useState(false);
 
-  // Dynamic participant list based on current user's name & role
-  const participants = isHost
-    ? [
-        {
-          id: "1",
-          name: `${userName} (you)`,
-          isHost: true,
-          initial: userName.charAt(0).toUpperCase() || "H",
-        },
-        {
-          id: "2",
-          name: "Alex",
-          isHost: false,
-          initial: "A",
-        },
-      ]
-    : [
-        {
-          id: "1",
-          name: "Maya",
-          isHost: true,
-          initial: "M",
-        },
-        {
-          id: "2",
-          name: `${userName} (you)`,
-          isHost: false,
-          initial: userName.charAt(0).toUpperCase() || "P",
-        },
-      ];
+  useEffect(() => {
+    const token = getToken();
+    const user = getUser();
 
-  const handleRegenerateCode = () => {
-    if (!isHost) return;
-    const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-    const digits = "23456789";
-    let newCode = "";
-    for (let i = 0; i < 3; i++) {
-      newCode += letters.charAt(Math.floor(Math.random() * letters.length));
-    }
-    for (let i = 0; i < 3; i++) {
-      newCode += digits.charAt(Math.floor(Math.random() * digits.length));
+    if (!token || !user) {
+      router.replace("/");
+      return;
     }
 
-    setCurrentCode(newCode);
-    window.history.replaceState(
-      null,
-      "",
-      `/room/${newCode}/setup?role=${role}&name=${encodeURIComponent(userName)}`
-    );
+    getRoomByCode(roomCode)
+      .then((data) => {
+        setRoom(data);
+        setReady(true);
+      })
+      .catch(() => {
+        router.replace("/");
+      });
+  }, [roomCode, router]);
+
+  const handleRoomClosed = () => {
+    router.replace("/");
   };
 
+  const { members } = useRoomSocket({
+    roomId: room?.id || null,
+    onRoomClosed: handleRoomClosed,
+  });
+
+  const currentUser = getUser();
+  const isHost = room?.host_id === currentUser?.id;
+
+  const sortedMembers = [...members].sort((a, b) => {
+    if (a.role === "host" && b.role !== "host") return -1;
+    if (a.role !== "host" && b.role === "host") return 1;
+    return 0;
+  });
+
+  const participants = sortedMembers.map((m) => ({
+    id: m.user_id,
+    name:
+      m.user?.username && m.user_id === currentUser?.id
+        ? `${m.user.username} (you)`
+        : m.user?.username || "Unknown",
+    isHost: m.role === "host",
+    initial: m.user?.username?.charAt(0).toUpperCase() || "?",
+  }));
+
   const handleStartSession = () => {
-    router.push(`/room/${currentCode}`);
+    router.push(`/room/${roomCode}`);
   };
 
   const handleConfirmLeave = () => {
@@ -82,17 +79,18 @@ export default function RoomSetupPage({
     router.push("/");
   };
 
+  if (!ready || !room) {
+    return null;
+  }
+
   return (
     <main className="w-full bg-background font-body-md text-on-surface min-h-screen">
       <div className="flex flex-col w-full">
-        {/* Interactive View Container */}
         <div
           className="w-full flex flex-col items-center justify-center min-h-[100dvh] px-margin py-space-xl transition-colors duration-200"
           id="canvas-wrapper"
         >
-          {/* Centered Column Sanctuary */}
           <section className="w-full max-w-md flex flex-col items-center text-center">
-            {/* Header Identity */}
             <header className="flex flex-col items-center mb-space-2xl">
               <h1 className="text-display font-display tracking-tight text-[#262422] select-none">
                 RIPIT
@@ -102,19 +100,21 @@ export default function RoomSetupPage({
               </p>
             </header>
 
-            {/* Waiting Hub Flow */}
+            {error && (
+              <div className="w-full mb-space-lg p-space-md rounded-lg bg-red-50 border border-red-200 text-red-600 text-body-sm">
+                {error}
+              </div>
+            )}
+
             <div className="w-full flex flex-col gap-space-xl">
-              {/* Room Code & Share Controls */}
               <WaitingCodeCard
-                roomCode={currentCode}
+                roomCode={roomCode}
                 isHost={isHost}
-                onRegenerate={handleRegenerateCode}
+                onRegenerate={() => { }}
               />
 
-              {/* Joined Participants */}
               <WaitingParticipantList participants={participants} />
 
-              {/* Actions & Role-Specific Status */}
               <div className="w-full flex flex-col gap-space-sm">
                 {isHost ? (
                   <>
@@ -163,7 +163,6 @@ export default function RoomSetupPage({
         </div>
       </div>
 
-      {/* Leave Room Confirmation Modal */}
       <ConfirmationModal
         isOpen={showLeaveModal}
         title="Leave room?"

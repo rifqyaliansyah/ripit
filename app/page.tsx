@@ -3,20 +3,22 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import NameInputModal from "@/components/NameInputModal";
+import { registerGuest, createRoom, joinRoomByCode, getRoomByCode } from "@/lib/api";
 
 export default function EntryScreen() {
   const router = useRouter();
   const [joinCode, setJoinCode] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCheckingRoom, setIsCheckingRoom] = useState(false);
 
-  // Modal State
   const [modalMode, setModalMode] = useState<"create" | "join" | null>(null);
 
   const handleOpenCreateModal = () => {
     setModalMode("create");
   };
 
-  const handleOpenJoinModal = (e: React.FormEvent) => {
+  const handleOpenJoinModal = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = joinCode.trim().toUpperCase();
 
@@ -31,49 +33,56 @@ export default function EntryScreen() {
     }
 
     setFeedback("");
-    setModalMode("join");
+    setIsCheckingRoom(true);
+
+    try {
+      await getRoomByCode(val);
+      setModalMode("join");
+    } catch {
+      setFeedback("Room not found. Check the code and try again.");
+    } finally {
+      setIsCheckingRoom(false);
+    }
   };
 
-  const handleNameSubmit = (name: string) => {
-    if (modalMode === "create") {
-      const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-      const digits = "23456789";
-      let randomCode = "";
-      for (let i = 0; i < 3; i++) {
-        randomCode += letters.charAt(Math.floor(Math.random() * letters.length));
-      }
-      for (let i = 0; i < 3; i++) {
-        randomCode += digits.charAt(Math.floor(Math.random() * digits.length));
-      }
+  const handleNameSubmit = async (name: string) => {
+    setIsSubmitting(true);
+    setFeedback("");
 
-      setModalMode(null);
-      router.push(
-        `/room/${randomCode}/setup?role=host&name=${encodeURIComponent(name)}`
-      );
-    } else if (modalMode === "join") {
-      const val = joinCode.trim().toUpperCase();
-      setModalMode(null);
-      setFeedback(`Connecting to ${val}...`);
+    try {
+      await registerGuest(name);
 
-      setTimeout(() => {
+      if (modalMode === "create") {
+        const room = await createRoom(`${name}'s Room`);
+        setModalMode(null);
         router.push(
-          `/room/${val}/setup?role=joiner&name=${encodeURIComponent(name)}`
+          `/room/${room.room_code}/setup?role=host&name=${encodeURIComponent(name)}`
         );
-      }, 500);
+      } else if (modalMode === "join") {
+        const code = joinCode.trim().toUpperCase();
+        await joinRoomByCode(code);
+        setModalMode(null);
+        router.push(
+          `/room/${code}/setup?role=joiner&name=${encodeURIComponent(name)}`
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setFeedback(message);
+      setModalMode(null);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <main className="w-full bg-background font-body-md text-on-surface min-h-screen">
       <div className="flex flex-col w-full">
-        {/* Interactive View Container */}
         <div
           className="w-full flex flex-col items-center justify-center min-h-[100dvh] px-margin transition-colors duration-200"
           id="canvas-wrapper"
         >
-          {/* Centered Column Sanctuary */}
           <section className="w-full max-w-md flex flex-col items-center text-center">
-            {/* Brand & Quiet Intimate Identity */}
             <header className="flex flex-col items-center mb-space-3xl">
               <h1 className="text-display font-display tracking-tight text-[#262422] select-none">
                 RIPIT
@@ -83,23 +92,21 @@ export default function EntryScreen() {
               </p>
             </header>
 
-            {/* Primary Action */}
             <div className="w-full flex flex-col gap-space-lg">
               <button
-                className="w-full py-space-md px-space-lg rounded-lg bg-[#EE5522] hover:bg-[#d84817] active:bg-[#c23f12] text-white font-title-sm text-title-sm transition-colors cursor-pointer select-none text-center shadow-sm"
+                className="w-full py-space-md px-space-lg rounded-lg bg-[#EE5522] hover:bg-[#d84817] active:bg-[#c23f12] text-white font-title-sm text-title-sm transition-colors cursor-pointer select-none text-center shadow-sm disabled:opacity-50"
                 onClick={handleOpenCreateModal}
                 type="button"
+                disabled={isSubmitting}
               >
                 Create a room
               </button>
             </div>
 
-            {/* Hairline Divider */}
             <div className="w-full my-space-2xl flex items-center justify-center">
               <div className="w-full h-px bg-[#E5DDD3]"></div>
             </div>
 
-            {/* Join Secondary Flow: Sharp Hairline Controls */}
             <div className="w-full flex flex-col items-start text-left">
               <label
                 className="text-label-md font-label-md text-[#76726D] mb-space-xs"
@@ -120,29 +127,24 @@ export default function EntryScreen() {
                     type="text"
                     value={joinCode}
                     onChange={(e) => setJoinCode(e.target.value)}
+                    disabled={isSubmitting}
                   />
                   <button
-                    className="px-space-xl py-space-md rounded-lg bg-surface-dim hover:bg-surface-variant active:bg-[#c8c2be] border border-[#c4beba] text-on-surface font-title-sm text-title-sm transition-colors whitespace-nowrap cursor-pointer shadow-xs"
+                    className="px-space-xl py-space-md rounded-lg bg-surface-dim hover:bg-surface-variant active:bg-[#c8c2be] border border-[#c4beba] text-on-surface font-title-sm text-title-sm transition-colors whitespace-nowrap cursor-pointer shadow-xs disabled:opacity-50"
                     type="submit"
+                    disabled={isSubmitting}
                   >
                     Join
                   </button>
                 </div>
                 {feedback && (
-                  <span
-                    className={`text-label-sm font-label-sm ${
-                      feedback.startsWith("Connecting")
-                        ? "text-[#76726D]"
-                        : "text-[#EE5522]"
-                    }`}
-                  >
+                  <span className="text-label-sm font-label-sm text-[#EE5522]">
                     {feedback}
                   </span>
                 )}
               </form>
             </div>
 
-            {/* Footer Micro-Presence Indicator */}
             <footer className="mt-space-3xl flex items-center justify-center gap-space-xs text-label-sm font-label-sm text-[#76726D]">
               <span className="inline-block w-1 h-1 rounded-full bg-[#76726D]"></span>
             </footer>
@@ -150,7 +152,6 @@ export default function EntryScreen() {
         </div>
       </div>
 
-      {/* Name Input Modal */}
       <NameInputModal
         isOpen={modalMode !== null}
         title={modalMode === "create" ? "What's your name?" : "Enter your name"}

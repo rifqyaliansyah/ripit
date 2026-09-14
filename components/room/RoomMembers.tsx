@@ -10,10 +10,17 @@ interface RoomMembersProps {
   members: RoomMember[];
   roomCode: string;
   currentHostId?: string;
+  hostLatencyMs: number | null;
   leaveRoom: () => void;
 }
 
-export default function RoomMembers({ members, roomCode, currentHostId, leaveRoom }: RoomMembersProps) {
+export default function RoomMembers({
+  members,
+  roomCode,
+  currentHostId,
+  hostLatencyMs,
+  leaveRoom,
+}: RoomMembersProps) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
@@ -45,9 +52,24 @@ export default function RoomMembers({ members, roomCode, currentHostId, leaveRoo
         {/* Header with Room Code */}
         <div className="pb-space-md border-b border-[#E5DDD3] shrink-0 flex flex-col gap-space-xs">
           <div className="flex items-center justify-between">
-            <span className="font-label-sm text-label-sm text-[#7A7672]">
-              Room Code
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-label-sm text-label-sm text-[#7A7672]">
+                Room Code
+              </span>
+              {hostLatencyMs !== null && (
+                <span
+                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                    hostLatencyMs < 100
+                      ? "bg-green-100 text-green-700"
+                      : hostLatencyMs < 300
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-red-100 text-red-700"
+                  }`}
+                >
+                  {hostLatencyMs}ms
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-space-xs">

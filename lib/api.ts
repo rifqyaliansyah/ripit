@@ -1,3 +1,5 @@
+import type { Room, JoinRoomResponse, User, Track } from "./types";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 if (!API_URL) {
@@ -62,8 +64,6 @@ export async function apiFetch<T>(
     return body.data as T;
 }
 
-import type { Room, JoinRoomResponse, User } from "./types";
-
 const USER_KEY = "ripit_user";
 
 export function setUser(user: User): void {
@@ -112,5 +112,79 @@ export async function joinRoomByCode(code: string): Promise<JoinRoomResponse> {
 export async function getRoomByCode(code: string): Promise<Room> {
     return apiFetch<Room>(`/api/v1/rooms/${code}`, {
         method: "GET",
+    });
+}
+
+export async function getTracks(roomId: string): Promise<Track[]> {
+    return apiFetch<Track[]>(`/api/v1/rooms/${roomId}/tracks`, {
+        method: "GET",
+    });
+}
+
+export interface AddTrackPayload {
+    youtube_url: string;
+    title: string;
+    artist: string;
+    duration: string;
+    cover_url?: string;
+    lyrics?: string;
+}
+
+export async function addTrack(roomId: string, payload: AddTrackPayload): Promise<Track> {
+    return apiFetch<Track>(`/api/v1/rooms/${roomId}/tracks`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+    });
+}
+
+export interface UpdateTrackPayload {
+    youtube_url?: string;
+    title?: string;
+    artist?: string;
+    duration?: string;
+    cover_url?: string;
+    lyrics?: string;
+    has_lyrics?: boolean;
+    sort_order?: number;
+}
+
+export async function updateTrack(
+    roomId: string,
+    trackId: string,
+    payload: UpdateTrackPayload
+): Promise<Track> {
+    return apiFetch<Track>(`/api/v1/rooms/${roomId}/tracks/${trackId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function deleteTrack(roomId: string, trackId: string): Promise<void> {
+    await apiFetch<null>(`/api/v1/rooms/${roomId}/tracks/${trackId}`, {
+        method: "DELETE",
+    });
+}
+
+export async function reorderTracks(roomId: string, trackIds: string[]): Promise<Track[]> {
+    return apiFetch<Track[]>(`/api/v1/rooms/${roomId}/tracks/reorder`, {
+        method: "PUT",
+        body: JSON.stringify({ track_ids: trackIds }),
+    });
+}
+
+export interface YouTubeMetadata {
+    video_id: string;
+    title: string;
+    artist: string;
+    duration: string;
+    duration_sec: number;
+    cover_url: string;
+    youtube_url: string;
+}
+
+export async function checkYoutubeUrl(url: string): Promise<YouTubeMetadata> {
+    return apiFetch<YouTubeMetadata>("/api/v1/youtube/check", {
+        method: "POST",
+        body: JSON.stringify({ url }),
     });
 }

@@ -1,5 +1,6 @@
 export type PlaybackState = "playing" | "paused";
 export type RoomRole = "host" | "listener";
+export type RepeatMode = "off" | "all" | "one";
 
 export interface User {
     id: string;
@@ -44,6 +45,8 @@ export interface Room {
     current_track?: Track;
     members?: RoomMember[];
     tracks?: Track[];
+    repeat_mode: RepeatMode;
+    is_shuffled: boolean;
 }
 
 export interface JoinRoomResponse {
@@ -71,7 +74,11 @@ export type WSEventType =
     | "ROOM_CLOSED"
     | "LEAVE_ROOM"
     | "SESSION_STARTED"
-    | "ERROR";
+    | "PLAYBACK_SETTINGS"
+    | "ERROR"
+    | "PING"
+    | "PONG"
+    | "HOST_LATENCY";
 
 export interface WSMessage<T = unknown> {
     type: WSEventType;

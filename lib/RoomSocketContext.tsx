@@ -1,13 +1,15 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from "react";
-import type { WSMessage, UserPresencePayload, Room, RoomMember } from "./types";
-import { getToken } from "./api";
+import type { WSMessage, UserPresencePayload, Room, RoomMember, Track } from "./types";
+import { getToken, getUser } from "./api";
 
 interface RoomSocketContextValue {
     room: Room | null;
     members: RoomMember[];
+    tracks: Track[];
     connected: boolean;
+    hostLatencyMs: number | null;
     send: (message: WSMessage) => void;
     leaveRoom: () => void;
 }
@@ -27,9 +29,11 @@ export function RoomSocketProvider({
 }) {
     const [room, setRoom] = useState<Room>(initialRoom);
     const [members, setMembers] = useState<RoomMember[]>(initialRoom.members || []);
+    const [tracks, setTracks] = useState<Track[]>(initialRoom.tracks || []);
     const [connected, setConnected] = useState(false);
     const wsRef = useRef<WebSocket | null>(null);
     const onRoomClosedRef = useRef(onRoomClosed);
+    const [hostLatencyMs, setHostLatencyMs] = useState<number | null>(null);
 
     useEffect(() => {
         onRoomClosedRef.current = onRoomClosed;
@@ -63,6 +67,7 @@ export function RoomSocketProvider({
                         const payload = msg.payload as { room: Room };
                         setRoom(payload.room);
                         setMembers(payload.room.members || []);
+                        setTracks(payload.room.tracks || []);
                         break;
                     }
                     case "USER_JOINED": {
@@ -88,13 +93,78 @@ export function RoomSocketProvider({
                         setMembers((prev) => prev.filter((m) => m.user_id !== payload.user_id));
                         break;
                     }
-                    case "ROOM_CLOSED": {
-                        onRoomClosedRef.current?.();
+                    case "QUEUE_UPDATED": {
+                        const payload = msg.payload as { tracks: Track[] };
+                        setTracks(payload.tracks || []);
+                        break;
+                    }
+                    case "SYNC_PLAYBACK": {
+                        const payload = msg.payload as {
+                            playback_state: string;
+                            playback_position_ms: number;
+                            current_track_id?: string | null;
+                        };
+                        setRoom((prev) =>
+                            prev
+                                ? {
+                                    ...prev,
+                                    playback_state: payload.playback_state as Room["playback_state"],
+                                    playback_position_ms: payload.playback_position_ms,
+                                    current_track_id:
+                                        payload.current_track_id !== undefined
+                                            ? payload.current_track_id
+                                            : prev.current_track_id,
+                                }
+                                : prev
+                        );
+                        break;
+                    }
+                    case "CHANGE_STATE": {
+                        const payload = msg.payload as {
+                            playback_state: string;
+                            position_ms?: number;
+                        };
+                        setRoom((prev) =>
+                            prev
+                                ? {
+                                    ...prev,
+                                    playback_state: payload.playback_state as Room["playback_state"],
+                                    playback_position_ms:
+                                        payload.position_ms !== undefined
+                                            ? payload.position_ms
+                                            : prev.playback_position_ms,
+                                }
+                                : prev
+                        );
                         break;
                     }
                     case "SESSION_STARTED": {
                         const payload = msg.payload as { session_started_at: string };
                         setRoom((prev) => (prev ? { ...prev, session_started_at: payload.session_started_at } : prev));
+                        break;
+                    }
+                    case "ROOM_CLOSED": {
+                        onRoomClosedRef.current?.();
+                        break;
+                    }
+                    case "PLAYBACK_SETTINGS": {
+                        const payload = msg.payload as { repeat_mode: Room["repeat_mode"]; is_shuffled: boolean };
+                        setRoom((prev) =>
+                            prev
+                                ? { ...prev, repeat_mode: payload.repeat_mode, is_shuffled: payload.is_shuffled }
+                                : prev
+                        );
+                        break;
+                    }
+                    case "PONG": {
+                        const payload = msg.payload as { sent_at: number };
+                        const latency = Date.now() - payload.sent_at;
+                        wsRef.current?.send(JSON.stringify({ type: "HOST_LATENCY", payload: { latency_ms: latency } }));
+                        break;
+                    }
+                    case "HOST_LATENCY": {
+                        const payload = msg.payload as { latency_ms: number };
+                        setHostLatencyMs(payload.latency_ms);
                         break;
                     }
                 }
@@ -107,6 +177,21 @@ export function RoomSocketProvider({
         };
     }, [roomId]);
 
+    useEffect(() => {
+        const user = getUser();
+        const isHost = !!(user && room && user.id === room.host_id);
+        if (!isHost || !connected) return;
+
+        const sendPing = () => {
+            wsRef.current?.send(JSON.stringify({ type: "PING", payload: { sent_at: Date.now() } }));
+        };
+
+        sendPing();
+        const id = setInterval(sendPing, 5000);
+
+        return () => clearInterval(id);
+    }, [room?.host_id, connected]);
+
     const send = useCallback((message: WSMessage) => {
         wsRef.current?.send(JSON.stringify(message));
     }, []);
@@ -117,7 +202,7 @@ export function RoomSocketProvider({
     }, [send]);
 
     return (
-        <RoomSocketContext.Provider value={{ room, members, connected, send, leaveRoom }}>
+        <RoomSocketContext.Provider value={{ room, members, tracks, connected, hostLatencyMs, send, leaveRoom }}>
             {children}
         </RoomSocketContext.Provider>
     );

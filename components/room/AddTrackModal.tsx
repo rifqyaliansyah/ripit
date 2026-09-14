@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import Modal from "@/components/ui/Modal";
+import { checkYoutubeUrl, ApiError } from "@/lib/api";
 
 interface TrackData {
   id?: string;
@@ -26,6 +27,11 @@ interface AddTrackModalProps {
   }) => void;
   onSaveTrack?: (updatedTrack: {
     id: string;
+    youtubeUrl: string;
+    title: string;
+    artist: string;
+    duration: string;
+    cover: string;
     lyrics: string;
   }) => void;
 }
@@ -54,10 +60,16 @@ export default function AddTrackModal({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const prevIsOpenRef = useRef(false);
+  const prevTrackIdRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
-    if (isOpen) {
+    const justOpened = isOpen && !prevIsOpenRef.current;
+    const trackChanged = isOpen && initialTrack?.id !== prevTrackIdRef.current;
+
+    if (justOpened || trackChanged) {
       if (initialTrack) {
-        setYoutubeUrl(initialTrack.youtubeUrl || "https://youtube.com/watch?v=example");
+        setYoutubeUrl(initialTrack.youtubeUrl || "");
         setLyrics(initialTrack.lyrics || "");
         setTrackPreview({
           title: initialTrack.title,
@@ -74,30 +86,42 @@ export default function AddTrackModal({
       setError("");
       setLyricTab("text");
     }
-  }, [isOpen, initialTrack]);
 
-  const handleCheckUrl = () => {
+    prevIsOpenRef.current = isOpen;
+    prevTrackIdRef.current = initialTrack?.id;
+  }, [isOpen, initialTrack?.id]);
+
+  const handleCheckUrl = async () => {
     const trimmed = youtubeUrl.trim();
     if (!trimmed) {
       setError("Please enter a YouTube link.");
       return;
     }
 
-    // Basic validation / mock checker
     setIsChecking(true);
     setError("");
 
-    setTimeout(() => {
-      setIsChecking(false);
-      // Mock result preview
+    try {
+      const metadata = await checkYoutubeUrl(trimmed);
       setTrackPreview({
-        title: "Kau dan Aku",
-        artist: "Nidji · 3:45",
-        duration: "3:45",
-        cover:
-          "https://lh3.googleusercontent.com/aida-public/AB6AXuDFhWyarsgnG7s3HQg2CIrX08UL8VQYN937QJkSGoSQII3mlrtVMgIJ2Fqmj9LWP_0lMVvXAScm5QZzASskS1mUmIqgUsAlZyfZK3gbAYGXICmRg4d3pYy6r6-Vtq9br8-jK9duyqYsDW20sPvvf2NLdvtPyyMb6FjeXdvI3T0br6jSsJ-RMWGiSXDwj5wfhuDoe95S5XHr-PXLnH-R8p0XKXdoXBb5a1rk_8dcjRmz-zZuRLgcsORn",
+        title: metadata.title,
+        artist: metadata.artist,
+        duration: metadata.duration,
+        cover: metadata.cover_url,
       });
-    }, 600);
+      // Normalize the URL field to the canonical one the backend resolved,
+      // so what gets submitted to AddTrack matches what was actually checked.
+      setYoutubeUrl(metadata.youtube_url || trimmed);
+    } catch (err) {
+      setTrackPreview(null);
+      if (err instanceof ApiError) {
+        setError(err.message || "Couldn't fetch video details.");
+      } else {
+        setError("Couldn't fetch video details. Check the link and try again.");
+      }
+    } finally {
+      setIsChecking(false);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,10 +140,25 @@ export default function AddTrackModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!youtubeUrl.trim()) {
+      setError("YouTube link is required.");
+      return;
+    }
+
+    if (!trackPreview) {
+      setError('Click "Check" to load video details.');
+      return;
+    }
+
     if (initialTrack && initialTrack.id) {
       if (onSaveTrack) {
         onSaveTrack({
           id: initialTrack.id,
+          youtubeUrl: youtubeUrl.trim(),
+          title: trackPreview.title,
+          artist: trackPreview.artist,
+          duration: trackPreview.duration,
+          cover: trackPreview.cover,
           lyrics,
         });
       }
@@ -127,20 +166,13 @@ export default function AddTrackModal({
       return;
     }
 
-    if (!youtubeUrl.trim()) {
-      setError("YouTube link is required.");
-      return;
-    }
-
     if (onAddTrack) {
       onAddTrack({
         youtubeUrl: youtubeUrl.trim(),
-        title: trackPreview?.title || "Custom Track",
-        artist: trackPreview?.artist || "YouTube Audio",
-        duration: trackPreview?.duration || "3:30",
-        cover:
-          trackPreview?.cover ||
-          "https://lh3.googleusercontent.com/aida-public/AB6AXuC1ZXDn6qXY1eqGRV6TwnFJFuG9JaLnzeI7yKvfdyLUe-fqufDPj7Q8iqsQ3VdoK1m8-2g7qC2uJovzMHFoCjqpfCRxGOKcgvKTLgzLgdo2_zgemsIr_2cM1FdEUT78wu06LcExCfCZ5IVAcLOom4gbuX8nfleFsAe2dEWtv4SzW--Zxvj2lqUbRYK5oSxXv4mr10dkQ4i0x7NHc6tDNcadC8f2qNz3d2vNX3Am3aietp3DI_dd4z32",
+        title: trackPreview.title,
+        artist: trackPreview.artist,
+        duration: trackPreview.duration,
+        cover: trackPreview.cover,
         lyrics,
       });
     }
@@ -190,6 +222,9 @@ export default function AddTrackModal({
                 value={youtubeUrl}
                 onChange={(e) => {
                   setYoutubeUrl(e.target.value);
+                  // URL changed after a successful check — the preview no longer
+                  // reflects what's in the input, so require a re-check.
+                  if (trackPreview) setTrackPreview(null);
                   if (error) setError("");
                 }}
                 className="flex-1 px-space-md py-space-sm rounded-lg bg-surface-container-lowest border border-[#E5DDD3] text-[#262422] placeholder-[#76726D]/70 focus:outline-none focus:border-[#262422] font-body-sm text-body-sm transition-colors"
@@ -223,7 +258,7 @@ export default function AddTrackModal({
                   {trackPreview.title}
                 </p>
                 <p className="text-label-sm font-label-sm text-[#7A7672] truncate">
-                  {trackPreview.artist}
+                  {trackPreview.artist} · {trackPreview.duration}
                 </p>
               </div>
             </div>
@@ -239,7 +274,7 @@ export default function AddTrackModal({
                   Track preview
                 </p>
                 <p className="text-[11px] text-[#7A7672]/80">
-                  Click "Check" to load video details
+                  Click &quot;Check&quot; to load video details
                 </p>
               </div>
             </div>
@@ -256,22 +291,20 @@ export default function AddTrackModal({
                 <button
                   type="button"
                   onClick={() => setLyricTab("text")}
-                  className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
-                    lyricTab === "text"
+                  className={`px-2 py-0.5 rounded transition-all cursor-pointer ${lyricTab === "text"
                       ? "bg-[#FDF9F4] text-[#262422] shadow-xs"
                       : "text-[#7A7672] hover:text-[#262422]"
-                  }`}
+                    }`}
                 >
                   Text
                 </button>
                 <button
                   type="button"
                   onClick={() => setLyricTab("upload")}
-                  className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
-                    lyricTab === "upload"
+                  className={`px-2 py-0.5 rounded transition-all cursor-pointer ${lyricTab === "upload"
                       ? "bg-[#FDF9F4] text-[#262422] shadow-xs"
                       : "text-[#7A7672] hover:text-[#262422]"
-                  }`}
+                    }`}
                 >
                   Upload .lrc
                 </button>
@@ -334,4 +367,3 @@ export default function AddTrackModal({
     </Modal>
   );
 }
-

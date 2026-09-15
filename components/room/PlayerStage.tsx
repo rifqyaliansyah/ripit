@@ -1,30 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useRoomSocketContext } from "@/lib/RoomSocketContext";
-import { getUser } from "@/lib/api";
+import { getUser, updateTrack } from "@/lib/api";
 import type { Track } from "@/lib/types";
+import { extractVideoId, formatTime } from "@/lib/utils";
 
 declare global {
   interface Window {
     YT: any;
     onYouTubeIframeAPIReady?: () => void;
   }
-}
-
-// Matches watch?v=, youtu.be/, embed/, and shorts/ URL forms.
-function extractVideoId(url: string): string | null {
-  const match = url.match(
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
-  );
-  return match ? match[1] : null;
-}
-
-function formatTime(seconds: number): string {
-  if (!isFinite(seconds) || seconds < 0) return "0:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 export interface WordSpan {
@@ -127,7 +113,7 @@ const HOST_HEARTBEAT_MS = 4000;
 type RepeatMode = "off" | "all" | "one";
 
 export default function PlayerStage() {
-  const { room, tracks, send } = useRoomSocketContext();
+  const { room, tracks, send, setTrackDuration } = useRoomSocketContext();
   const [apiReady, setApiReady] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [localPosition, setLocalPosition] = useState(0);
@@ -143,6 +129,7 @@ export default function PlayerStage() {
   const tracksRef = useRef(tracks);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const advanceOnEndRef = useRef<() => void>(() => { });
+  const durationSyncedRef = useRef<Set<string>>(new Set());
 
   const user = getUser();
   const isHost = !!(user && room && user.id === room.host_id);
@@ -190,6 +177,108 @@ export default function PlayerStage() {
     };
   }, []);
 
+  // Capture the real duration from the YT player once it's known and
+  // persist it if the stored duration was "0:00" (backend couldn't resolve it).
+  const captureRealDuration = useCallback(() => {
+    const dur = playerRef.current?.getDuration?.() ?? 0;
+    if (dur <= 0) return;
+
+    const ct = tracksRef.current.find((t) => t.id === roomRef.current?.current_track_id);
+    if (!ct) return;
+
+    const formatted = formatTime(dur);
+    setTrackDuration(ct.id, formatted);
+
+    // Persist to DB once per session so future page loads show the real duration
+    if (!durationSyncedRef.current.has(ct.id) && (!ct.duration || ct.duration === "0:00")) {
+      durationSyncedRef.current.add(ct.id);
+      updateTrack(ct.room_id, ct.id, { duration: formatted }).catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setTrackDuration]);
+
+  // Once the YT API is loaded, resolve durations for ALL tracks that still
+  // show "0:00". Processes them sequentially with a single hidden player to
+  // keep resource usage minimal.
+  useEffect(() => {
+    if (!apiReady || !window.YT?.Player) return;
+
+    const tracksToResolve = tracksRef.current.filter(
+      (t) => (!t.duration || t.duration === "0:00") && !durationSyncedRef.current.has(t.id)
+    );
+    if (tracksToResolve.length === 0) return;
+
+    let cancelled = false;
+    let tempPlayer: any = null;
+    const tempDiv = document.createElement("div");
+    tempDiv.style.cssText = "position:absolute;width:0;height:0;overflow:hidden";
+    document.body.appendChild(tempDiv);
+
+    const resolveNext = (index: number) => {
+      if (cancelled || index >= tracksToResolve.length) {
+        try { tempPlayer?.destroy(); } catch { /* ignore */ }
+        tempDiv.remove();
+        return;
+      }
+
+      const track = tracksToResolve[index];
+      // Skip if already resolved by captureRealDuration in the meantime
+      if (durationSyncedRef.current.has(track.id)) {
+        resolveNext(index + 1);
+        return;
+      }
+
+      const vid = extractVideoId(track.youtube_url);
+      if (!vid) { resolveNext(index + 1); return; }
+
+      // Destroy previous instance before creating a new one
+      try { tempPlayer?.destroy(); } catch { /* ignore */ }
+      // Re-create the container since YT.Player replaces the element
+      tempDiv.innerHTML = "";
+      const inner = document.createElement("div");
+      tempDiv.appendChild(inner);
+
+      let attempts = 0;
+      tempPlayer = new window.YT.Player(inner, {
+        height: "0",
+        width: "0",
+        videoId: vid,
+        playerVars: { autoplay: 0, controls: 0 },
+        events: {
+          onReady: () => {
+            const poll = () => {
+              if (cancelled) return;
+              const dur = tempPlayer?.getDuration?.() ?? 0;
+              if (dur > 0) {
+                const formatted = formatTime(dur);
+                setTrackDuration(track.id, formatted);
+                if (!durationSyncedRef.current.has(track.id)) {
+                  durationSyncedRef.current.add(track.id);
+                  updateTrack(track.room_id, track.id, { duration: formatted }).catch(() => {});
+                }
+                resolveNext(index + 1);
+              } else if (++attempts < 15) {
+                setTimeout(poll, 500);
+              } else {
+                resolveNext(index + 1);
+              }
+            };
+            poll();
+          },
+        },
+      });
+    };
+
+    resolveNext(0);
+
+    return () => {
+      cancelled = true;
+      try { tempPlayer?.destroy(); } catch { /* ignore */ }
+      tempDiv.remove();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiReady, tracks.length, setTrackDuration]);
+
   // Create the player once we know what to play.
   useEffect(() => {
     if (!apiReady || !videoId || playerRef.current) return;
@@ -209,15 +298,21 @@ export default function PlayerStage() {
           if (r?.playback_state === "playing") {
             playerRef.current.playVideo();
           }
+          captureRealDuration();
         },
         onStateChange: (event: any) => {
           if (event.data === window.YT.PlayerState.ENDED) {
             advanceOnEndRef.current();
           }
+          // YT sometimes reports duration as 0 until the video actually starts
+          // buffering/playing, so re-capture when state changes too.
+          if (event.data === window.YT.PlayerState.PLAYING) {
+            captureRealDuration();
+          }
         },
       },
     });
-  }, [apiReady, videoId]);
+  }, [apiReady, videoId, captureRealDuration]);
 
   // Swap the loaded video whenever current_track_id changes.
   useEffect(() => {
@@ -231,8 +326,11 @@ export default function PlayerStage() {
     } else {
       playerRef.current.cueVideoById(videoId, startAt);
     }
+    // Capture duration for the newly loaded video after a short delay
+    // (the YT player may not report it immediately after cue/load).
+    setTimeout(() => captureRealDuration(), 1500);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoId, playerReady]);
+  }, [videoId, playerReady, captureRealDuration]);
 
   // Apply playback_state / position from the room — this fires for host and
   // listeners alike, since the hub broadcasts SYNC_PLAYBACK/CHANGE_STATE back
@@ -243,9 +341,15 @@ export default function PlayerStage() {
 
     const targetSec = room.playback_position_ms / 1000;
     const current = playerRef.current.getCurrentTime?.() ?? 0;
+    const totalDuration = playerRef.current.getDuration?.() ?? 0;
+
+    // Avoid jumping backwards if the song naturally finished playing
+    const isAtEnd = totalDuration > 0 && Math.abs(current - totalDuration) < 2.5;
 
     if (Math.abs(current - targetSec) > SYNC_DRIFT_THRESHOLD_SEC) {
-      playerRef.current.seekTo(targetSec, true);
+      if (!(room.playback_state === "paused" && isAtEnd && targetSec < current)) {
+        playerRef.current.seekTo(targetSec, true);
+      }
     }
 
     if (room.playback_state === "playing") {
@@ -305,9 +409,13 @@ export default function PlayerStage() {
     return parseLRC(currentTrack?.lyrics || "");
   }, [currentTrack?.lyrics]);
 
+  const isSyncedLyrics = useMemo(() => {
+    return parsedLyrics.some((l) => l.time >= 0);
+  }, [parsedLyrics]);
+
   // Find active lyric index
   const activeLyricIndex = useMemo(() => {
-    if (parsedLyrics.length === 0) return -1;
+    if (!isSyncedLyrics || parsedLyrics.length === 0) return -1;
     let activeIdx = -1;
     for (let i = 0; i < parsedLyrics.length; i++) {
       if (parsedLyrics[i].time >= 0 && parsedLyrics[i].time <= localPosition) {
@@ -317,7 +425,7 @@ export default function PlayerStage() {
       }
     }
     return activeIdx;
-  }, [parsedLyrics, localPosition]);
+  }, [isSyncedLyrics, parsedLyrics, localPosition]);
 
   const activeLyricRef = useRef<HTMLDivElement | null>(null);
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
@@ -390,7 +498,14 @@ export default function PlayerStage() {
       const isLastTrack = idx === -1 || idx === list.length - 1;
 
       if (isLastTrack && repeatMode === "off" && !isShuffled) {
-        send({ type: "CHANGE_STATE", payload: { playback_state: "paused" } });
+        const totalDurationMs = Math.round((playerRef.current?.getDuration?.() ?? 0) * 1000);
+        send({
+          type: "CHANGE_STATE",
+          payload: {
+            playback_state: "paused",
+            position_ms: totalDurationMs > 0 ? totalDurationMs : undefined,
+          },
+        });
         return;
       }
 
@@ -448,7 +563,12 @@ export default function PlayerStage() {
 
   const isPlaying = room?.playback_state === "playing";
   const durationSec = playerRef.current?.getDuration?.() ?? 0;
-  const livePct = durationSec > 0 ? Math.min(100, (localPosition / durationSec) * 100) : 0;
+  const currentSec = isDragging && dragPct !== null
+    ? (dragPct / 100) * durationSec
+    : durationSec > 0
+    ? Math.min(localPosition, durationSec)
+    : localPosition;
+  const livePct = durationSec > 0 ? Math.min(100, (currentSec / durationSec) * 100) : 0;
   const progressPct = dragPct ?? livePct;
 
   // --- Seek bar drag handling ---
@@ -500,8 +620,8 @@ export default function PlayerStage() {
       <div id="yt-player-container" className="w-0 h-0 overflow-hidden" />
 
       {/* Track Header */}
-      <div className="shrink-0 flex flex-col md:flex-row items-center justify-between gap-space-md pb-space-md border-b border-[#E5DDD3]">
-        <div className="flex items-center gap-space-md text-center md:text-left">
+      <div className="shrink-0 flex items-center justify-between gap-space-md pb-space-md border-b border-[#E5DDD3]">
+        <div className="flex items-center gap-space-md text-left">
           <div className="w-12 h-12 lg:w-14 lg:h-14 rounded-lg overflow-hidden shrink-0 bg-[#EAE1D7] flex items-center justify-center">
             {currentTrack?.cover_url ? (
               <img
@@ -524,16 +644,6 @@ export default function PlayerStage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={toggleMute}
-          className="p-space-xs text-[#7A7672] hover:text-[#2B2A27] transition-colors cursor-pointer"
-          title={isMuted ? "Unmute" : "Mute"}
-          type="button"
-        >
-          <span className="material-symbols-outlined text-[20px]">
-            {isMuted ? "volume_off" : "volume_up"}
-          </span>
-        </button>
       </div>
 
       {/* Center Lyric Stage: Spotify-style, left-aligned, prominent font size */}
@@ -549,7 +659,7 @@ export default function PlayerStage() {
           >
             <div className="h-[25vh] shrink-0" />
             {parsedLyrics.map((line, idx) => {
-              const isActive = idx === activeLyricIndex;
+              const isActive = isSyncedLyrics && idx === activeLyricIndex;
               const distance = activeLyricIndex === -1 ? 99 : Math.abs(idx - activeLyricIndex);
 
               return (
@@ -557,15 +667,15 @@ export default function PlayerStage() {
                   key={`${idx}-${line.time}`}
                   ref={isActive ? activeLyricRef : null}
                   onClick={() => handleLyricClick(line.time)}
-                  className={`font-headline-md text-headline-md lg:text-headline-lg select-none transition-all duration-300 text-left ${
-                    line.time >= 0 ? "cursor-pointer" : ""
-                  } ${
-                    isActive
-                      ? "text-[#262422] font-bold scale-[1.02] origin-left"
-                      : distance === 1
-                      ? "text-[#7A7672]/60 font-medium hover:text-[#262422]"
-                      : "text-[#7A7672]/35 font-medium hover:text-[#262422]"
-                  }`}
+                  className={`font-headline-md text-headline-md lg:text-headline-lg select-none transition-all duration-300 text-left ${line.time >= 0 ? "cursor-pointer" : ""
+                    } ${!isSyncedLyrics
+                      ? "text-[#262422] font-medium"
+                      : isActive
+                        ? "text-[#262422] font-bold scale-[1.02] origin-left"
+                        : distance === 1
+                          ? "text-[#7A7672]/60 font-medium hover:text-[#262422]"
+                          : "text-[#7A7672]/35 font-medium hover:text-[#262422]"
+                    }`}
                 >
                   {line.words && line.words.length > 0 ? (
                     <span>
@@ -574,13 +684,12 @@ export default function PlayerStage() {
                         return (
                           <span
                             key={wIdx}
-                            className={`transition-colors duration-150 ${
-                              isActive
+                            className={`transition-colors duration-150 ${isActive
                                 ? isWordSung
                                   ? "text-[#262422] font-bold"
                                   : "text-[#7A7672]/30 font-medium"
                                 : ""
-                            }`}
+                              }`}
                           >
                             {w.text}
                           </span>
@@ -651,66 +760,84 @@ export default function PlayerStage() {
             </div>
           </div>
           <div className="w-full flex items-center justify-between font-label-sm text-label-sm text-[#7A7672]">
-            <span>{formatTime(isDragging && dragPct !== null ? (dragPct / 100) * durationSec : localPosition)}</span>
-            <span>{formatTime(durationSec)}</span>
+            <span>{formatTime(currentSec)}</span>
+            <span>{durationSec > 0 ? formatTime(durationSec) : currentTrack?.duration || "0:00"}</span>
           </div>
         </div>
-        <div className="flex items-center justify-center gap-space-sm lg:gap-space-lg">
-          <button
-            className={`transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${isShuffled ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
-              }`}
-            title="Shuffle"
-            type="button"
-            onClick={() => updatePlaybackSettings({ is_shuffled: !isShuffled })}
-          >
-            <span className="material-symbols-outlined text-[20px]">shuffle</span>
-          </button>
 
-          <button
-            className="text-[#2B2A27] hover:text-[#EE5522] transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Previous track"
-            type="button"
-            onClick={() => jumpToTrack(-1)}
-          >
-            <span className="material-symbols-outlined text-[26px]">skip_previous</span>
-          </button>
+        <div className="relative flex items-center justify-center">
+          {/* Controls row */}
+          <div className="flex items-center justify-center gap-space-sm lg:gap-space-lg">
+            <button
+              className={`transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${isShuffled ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
+                }`}
+              title="Shuffle"
+              type="button"
+              onClick={() => updatePlaybackSettings({ is_shuffled: !isShuffled })}
+            >
+              <span className="material-symbols-outlined text-[20px]">shuffle</span>
+            </button>
 
-          <button
-            className="text-[#EE5522] hover:opacity-85 transition-opacity p-space-xs flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Play or Pause"
-            type="button"
-            disabled={tracks.length === 0}
-            onClick={handlePlayPause}
-          >
-            <span className="material-symbols-outlined text-[38px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-              {isPlaying ? "pause" : "play_arrow"}
-            </span>
-          </button>
+            <button
+              className="text-[#2B2A27] hover:text-[#EE5522] transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Previous track"
+              type="button"
+              onClick={() => jumpToTrack(-1)}
+            >
+              <span className="material-symbols-outlined text-[26px]">skip_previous</span>
+            </button>
 
-          <button
-            className="text-[#2B2A27] hover:text-[#EE5522] transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Next track"
-            type="button"
-            onClick={() => jumpToTrack(1)}
-          >
-            <span className="material-symbols-outlined text-[26px]">skip_next</span>
-          </button>
+            <button
+              className="text-[#EE5522] hover:opacity-85 transition-opacity p-space-xs flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Play or Pause"
+              type="button"
+              disabled={tracks.length === 0}
+              onClick={handlePlayPause}
+            >
+              <span className="material-symbols-outlined text-[38px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                {isPlaying ? "pause" : "play_arrow"}
+              </span>
+            </button>
 
-          <button
-            className={`transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${repeatMode !== "off" ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
-              }`}
-            title={`Repeat: ${repeatMode}`}
-            type="button"
-            onClick={() =>
-              updatePlaybackSettings({
-                repeat_mode: repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off",
-              })
-            }
-          >
-            <span className="material-symbols-outlined text-[20px]">
-              {repeatMode === "one" ? "repeat_one" : "repeat"}
-            </span>
-          </button>
+            <button
+              className="text-[#2B2A27] hover:text-[#EE5522] transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+              title="Next track"
+              type="button"
+              onClick={() => jumpToTrack(1)}
+            >
+              <span className="material-symbols-outlined text-[26px]">skip_next</span>
+            </button>
+
+            <button
+              className={`transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${repeatMode !== "off" ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
+                }`}
+              title={`Repeat: ${repeatMode}`}
+              type="button"
+              onClick={() =>
+                updatePlaybackSettings({
+                  repeat_mode: repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off",
+                })
+              }
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                {repeatMode === "one" ? "repeat_one" : "repeat"}
+              </span>
+            </button>
+          </div>
+
+          {/* Volume button: positioned right below duration */}
+          <div className="absolute right-0 flex items-center">
+            <button
+              onClick={toggleMute}
+              className="p-space-xs text-[#7A7672] hover:text-[#2B2A27] transition-colors cursor-pointer"
+              title={isMuted ? "Unmute" : "Mute"}
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[20px]">
+                {isMuted ? "volume_off" : "volume_up"}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
     </main>

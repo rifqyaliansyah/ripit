@@ -1,6 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import Modal from "@/components/ui/Modal";
 import { checkYoutubeUrl, ApiError } from "@/lib/api";
+import { extractVideoId } from "@/lib/utils";
+
+declare global {
+  interface Window {
+    YT: any;
+  }
+}
 
 interface TrackData {
   id?: string;
@@ -59,9 +66,21 @@ export default function AddTrackModal({
   const [error, setError] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tempPlayerRef = useRef<any>(null);
+  const tempDivRef = useRef<HTMLDivElement | null>(null);
 
   const prevIsOpenRef = useRef(false);
   const prevTrackIdRef = useRef<string | undefined>(undefined);
+
+  const MAX_LYRICS_FILE_SIZE = 100 * 1024;
+
+  // Destroy any lingering temp player (e.g. when modal closes mid-resolve)
+  const destroyTempPlayer = () => {
+    try { tempPlayerRef.current?.destroy(); } catch { /* ignore */ }
+    tempPlayerRef.current = null;
+    tempDivRef.current?.remove();
+    tempDivRef.current = null;
+  };
 
   useEffect(() => {
     const justOpened = isOpen && !prevIsOpenRef.current;
@@ -87,9 +106,64 @@ export default function AddTrackModal({
       setLyricTab("text");
     }
 
+    // Cleanup temp player when modal closes
+    if (!isOpen) destroyTempPlayer();
+
     prevIsOpenRef.current = isOpen;
     prevTrackIdRef.current = initialTrack?.id;
   }, [isOpen, initialTrack?.id]);
+
+  // Cleanup on unmount
+  useEffect(() => () => destroyTempPlayer(), []);
+
+  // Resolve real duration via a hidden YT player. Updates the preview's
+  // duration field once getDuration() returns a non-zero value.
+  const resolveYTDuration = (videoId: string) => {
+    if (!window.YT?.Player) return;
+
+    destroyTempPlayer(); // clean up any previous attempt
+
+    const div = document.createElement("div");
+    div.style.position = "absolute";
+    div.style.width = "0";
+    div.style.height = "0";
+    div.style.overflow = "hidden";
+    document.body.appendChild(div);
+    tempDivRef.current = div;
+
+    let attempts = 0;
+    const maxAttempts = 20; // ~10 seconds max
+
+    tempPlayerRef.current = new window.YT.Player(div, {
+      height: "0",
+      width: "0",
+      videoId,
+      playerVars: { autoplay: 0, controls: 0 },
+      events: {
+        onReady: () => {
+          const poll = () => {
+            if (!tempPlayerRef.current) return;
+            const dur = tempPlayerRef.current.getDuration?.() ?? 0;
+            if (dur > 0) {
+              const totalSec = Math.round(dur);
+              const m = Math.floor(totalSec / 60);
+              const s = totalSec % 60;
+              const formatted = `${m}:${s.toString().padStart(2, "0")}`;
+              setTrackPreview((prev) =>
+                prev ? { ...prev, duration: formatted } : prev
+              );
+              destroyTempPlayer();
+            } else if (++attempts < maxAttempts) {
+              setTimeout(poll, 500);
+            } else {
+              destroyTempPlayer();
+            }
+          };
+          poll();
+        },
+      },
+    });
+  };
 
   const handleCheckUrl = async () => {
     const trimmed = youtubeUrl.trim();
@@ -103,15 +177,31 @@ export default function AddTrackModal({
 
     try {
       const metadata = await checkYoutubeUrl(trimmed);
+      // Compute the duration display from duration_sec when available;
+      // the backend's pre-formatted duration field may be "0:00".
+      let durationDisplay = metadata.duration;
+      if (metadata.duration_sec > 0) {
+        const totalSec = Math.round(metadata.duration_sec);
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        durationDisplay = `${m}:${s.toString().padStart(2, "0")}`;
+      }
       setTrackPreview({
         title: metadata.title,
         artist: metadata.artist,
-        duration: metadata.duration,
+        duration: durationDisplay,
         cover: metadata.cover_url,
       });
       // Normalize the URL field to the canonical one the backend resolved,
       // so what gets submitted to AddTrack matches what was actually checked.
       setYoutubeUrl(metadata.youtube_url || trimmed);
+
+      // If the backend couldn't resolve the duration, use a hidden YT player
+      // to get the real value from the IFrame API.
+      if (!metadata.duration_sec || metadata.duration_sec <= 0) {
+        const vid = extractVideoId(metadata.youtube_url || trimmed);
+        if (vid) resolveYTDuration(vid);
+      }
     } catch (err) {
       setTrackPreview(null);
       if (err instanceof ApiError) {
@@ -128,11 +218,25 @@ export default function AddTrackModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > MAX_LYRICS_FILE_SIZE) {
+      setError("Lyrics file is too large (max 100KB).");
+      e.target.value = "";
+      return;
+    }
+
     setFileName(file.name);
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
+      if (content.length > MAX_LYRICS_FILE_SIZE) {
+        setError("Lyrics file is too large (max 100KB).");
+        setFileName("");
+        return;
+      }
       setLyrics(content);
+    };
+    reader.onerror = () => {
+      setError("Failed to read file.");
     };
     reader.readAsText(file);
   };

@@ -7,7 +7,7 @@ import { addTrack, updateTrack, deleteTrack, getUser, type AddTrackPayload } fro
 import type { Track } from "@/lib/types";
 
 export default function TrackQueue() {
-  const { room, tracks, send } = useRoomSocketContext();
+  const { room, tracks, send, trackDurationMap } = useRoomSocketContext();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
   const [openMenuTrackId, setOpenMenuTrackId] = useState<string | null>(null);
@@ -250,7 +250,7 @@ export default function TrackQueue() {
                         : "opacity-100 group-hover:opacity-0"
                         }`}
                     >
-                      {track.duration}
+                      {trackDurationMap[track.id] || track.duration}
                     </span>
 
                     <button
@@ -326,7 +326,7 @@ export default function TrackQueue() {
               youtubeUrl: selectedTrack.youtube_url,
               title: selectedTrack.title,
               artist: selectedTrack.artist,
-              duration: selectedTrack.duration,
+              duration: trackDurationMap[selectedTrack.id] || selectedTrack.duration,
               cover: selectedTrack.cover_url,
               lyrics: selectedTrack.lyrics || "",
               hasLyrics: selectedTrack.has_lyrics,

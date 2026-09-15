@@ -10,7 +10,9 @@ interface RoomSocketContextValue {
     tracks: Track[];
     connected: boolean;
     hostLatencyMs: number | null;
+    trackDurationMap: Record<string, string>;
     send: (message: WSMessage) => void;
+    setTrackDuration: (trackId: string, duration: string) => void;
     leaveRoom: () => void;
 }
 
@@ -34,6 +36,14 @@ export function RoomSocketProvider({
     const wsRef = useRef<WebSocket | null>(null);
     const onRoomClosedRef = useRef(onRoomClosed);
     const [hostLatencyMs, setHostLatencyMs] = useState<number | null>(null);
+    const [trackDurationMap, setTrackDurationMap] = useState<Record<string, string>>({});
+
+    const setTrackDuration = useCallback((trackId: string, duration: string) => {
+        setTrackDurationMap((prev) => {
+            if (prev[trackId] === duration) return prev;
+            return { ...prev, [trackId]: duration };
+        });
+    }, []);
 
     useEffect(() => {
         onRoomClosedRef.current = onRoomClosed;
@@ -202,7 +212,7 @@ export function RoomSocketProvider({
     }, [send]);
 
     return (
-        <RoomSocketContext.Provider value={{ room, members, tracks, connected, hostLatencyMs, send, leaveRoom }}>
+        <RoomSocketContext.Provider value={{ room, members, tracks, connected, hostLatencyMs, trackDurationMap, send, setTrackDuration, leaveRoom }}>
             {children}
         </RoomSocketContext.Provider>
     );

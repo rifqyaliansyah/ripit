@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useRoomSocketContext } from "@/lib/RoomSocketContext";
 import { getUser, updateTrack } from "@/lib/api";
 import type { Track } from "@/lib/types";
-import { extractVideoId, formatTime } from "@/lib/utils";
 
 declare global {
   interface Window {
@@ -13,15 +12,30 @@ declare global {
   }
 }
 
+function extractVideoId(url: string): string | null {
+  const match = url.match(
+    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+  );
+  return match ? match[1] : null;
+}
+
+export function formatTime(seconds: number): string {
+  if (!isFinite(seconds) || seconds < 0) return "0:00";
+  const totalSec = Math.round(seconds);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export interface WordSpan {
-  time: number; // in seconds
+  time: number;
   text: string;
 }
 
 export interface LyricLine {
-  time: number; // seconds, or -1 if plain text
+  time: number;
   text: string;
-  words?: WordSpan[]; // Word-by-word timestamps (Enhanced LRC)
+  words?: WordSpan[];
 }
 
 function parseTimestamp(minStr: string, secStr: string, msStr?: string): number {
@@ -47,18 +61,15 @@ export function parseLRC(lrcText: string): LyricLine[] {
     const trimmed = rawLine.trim();
     if (!trimmed) continue;
 
-    // Ignore metadata tags e.g. [ar: ...], [ti: ...], [id: ...], [length: ...]
     if (/^\[[a-zA-Z]+:\s*[^\]]*\]$/.test(trimmed)) {
       continue;
     }
 
-    // Find line-level timestamps e.g. [00:12.34]
     const lineMatches = Array.from(trimmed.matchAll(lineTimeRegex));
     if (lineMatches.length > 0) {
       const rawContent = trimmed.replace(lineTimeRegex, "").trim();
       if (!rawContent) continue;
 
-      // Check if line contains Enhanced LRC word timestamps: <mm:ss.xx>
       const hasWordTags = /<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>/.test(rawContent);
 
       for (const lm of lineMatches) {
@@ -69,7 +80,6 @@ export function parseLRC(lrcText: string): LyricLine[] {
         if (hasWordTags) {
           words = [];
 
-          // 1. Check if there is leading text before the first <tag>
           const firstTagIdx = rawContent.indexOf("<");
           if (firstTagIdx > 0) {
             const leadingText = rawContent.slice(0, firstTagIdx);
@@ -78,7 +88,6 @@ export function parseLRC(lrcText: string): LyricLine[] {
             }
           }
 
-          // 2. Extract each <time>word segment
           const tagPattern = /<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>([^<]*)/g;
           let match: RegExpExecArray | null;
           while ((match = tagPattern.exec(rawContent)) !== null) {
@@ -103,12 +112,12 @@ export function parseLRC(lrcText: string): LyricLine[] {
     }
   }
 
-  // Sort by timestamp
   return result.sort((a, b) => (a.time >= 0 && b.time >= 0 ? a.time - b.time : 0));
 }
 
 const SYNC_DRIFT_THRESHOLD_SEC = 1.5;
 const HOST_HEARTBEAT_MS = 4000;
+const SYNC_INDICATOR_DURATION_MS = 1200;
 
 type RepeatMode = "off" | "all" | "one";
 
@@ -118,10 +127,9 @@ export default function PlayerStage() {
   const [playerReady, setPlayerReady] = useState(false);
   const [localPosition, setLocalPosition] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
-  // const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
-  // const [isShuffled, setIsShuffled] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragPct, setDragPct] = useState<number | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const playerRef = useRef<any>(null);
   const loadedVideoIdRef = useRef<string | null>(null);
@@ -130,6 +138,7 @@ export default function PlayerStage() {
   const progressBarRef = useRef<HTMLDivElement>(null);
   const advanceOnEndRef = useRef<() => void>(() => { });
   const durationSyncedRef = useRef<Set<string>>(new Set());
+  const syncIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const user = getUser();
   const isHost = !!(user && room && user.id === room.host_id);
@@ -155,10 +164,15 @@ export default function PlayerStage() {
     tracksRef.current = tracks;
   }, [tracks]);
 
+  useEffect(() => {
+    return () => {
+      if (syncIndicatorTimeoutRef.current) clearTimeout(syncIndicatorTimeoutRef.current);
+    };
+  }, []);
+
   const currentTrack = tracks.find((t) => t.id === room?.current_track_id) || null;
   const videoId = currentTrack ? extractVideoId(currentTrack.youtube_url) : null;
 
-  // Load the YouTube IFrame API script once, globally.
   useEffect(() => {
     if (window.YT && window.YT.Player) {
       setApiReady(true);
@@ -177,8 +191,6 @@ export default function PlayerStage() {
     };
   }, []);
 
-  // Capture the real duration from the YT player once it's known and
-  // persist it if the stored duration was "0:00" (backend couldn't resolve it).
   const captureRealDuration = useCallback(() => {
     const dur = playerRef.current?.getDuration?.() ?? 0;
     if (dur <= 0) return;
@@ -189,17 +201,13 @@ export default function PlayerStage() {
     const formatted = formatTime(dur);
     setTrackDuration(ct.id, formatted);
 
-    // Persist to DB once per session so future page loads show the real duration
     if (!durationSyncedRef.current.has(ct.id) && (!ct.duration || ct.duration === "0:00")) {
       durationSyncedRef.current.add(ct.id);
-      updateTrack(ct.room_id, ct.id, { duration: formatted }).catch(() => {});
+      updateTrack(ct.room_id, ct.id, { duration: formatted }).catch(() => { });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setTrackDuration]);
 
-  // Once the YT API is loaded, resolve durations for ALL tracks that still
-  // show "0:00". Processes them sequentially with a single hidden player to
-  // keep resource usage minimal.
   useEffect(() => {
     if (!apiReady || !window.YT?.Player) return;
 
@@ -222,7 +230,6 @@ export default function PlayerStage() {
       }
 
       const track = tracksToResolve[index];
-      // Skip if already resolved by captureRealDuration in the meantime
       if (durationSyncedRef.current.has(track.id)) {
         resolveNext(index + 1);
         return;
@@ -231,9 +238,7 @@ export default function PlayerStage() {
       const vid = extractVideoId(track.youtube_url);
       if (!vid) { resolveNext(index + 1); return; }
 
-      // Destroy previous instance before creating a new one
       try { tempPlayer?.destroy(); } catch { /* ignore */ }
-      // Re-create the container since YT.Player replaces the element
       tempDiv.innerHTML = "";
       const inner = document.createElement("div");
       tempDiv.appendChild(inner);
@@ -254,7 +259,7 @@ export default function PlayerStage() {
                 setTrackDuration(track.id, formatted);
                 if (!durationSyncedRef.current.has(track.id)) {
                   durationSyncedRef.current.add(track.id);
-                  updateTrack(track.room_id, track.id, { duration: formatted }).catch(() => {});
+                  updateTrack(track.room_id, track.id, { duration: formatted }).catch(() => { });
                 }
                 resolveNext(index + 1);
               } else if (++attempts < 15) {
@@ -276,10 +281,9 @@ export default function PlayerStage() {
       try { tempPlayer?.destroy(); } catch { /* ignore */ }
       tempDiv.remove();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiReady, tracks.length, setTrackDuration]);
 
-  // Create the player once we know what to play.
   useEffect(() => {
     if (!apiReady || !videoId || playerRef.current) return;
 
@@ -304,8 +308,6 @@ export default function PlayerStage() {
           if (event.data === window.YT.PlayerState.ENDED) {
             advanceOnEndRef.current();
           }
-          // YT sometimes reports duration as 0 until the video actually starts
-          // buffering/playing, so re-capture when state changes too.
           if (event.data === window.YT.PlayerState.PLAYING) {
             captureRealDuration();
           }
@@ -314,7 +316,6 @@ export default function PlayerStage() {
     });
   }, [apiReady, videoId, captureRealDuration]);
 
-  // Swap the loaded video whenever current_track_id changes.
   useEffect(() => {
     if (!playerReady || !playerRef.current || !videoId) return;
     if (loadedVideoIdRef.current === videoId) return;
@@ -326,16 +327,10 @@ export default function PlayerStage() {
     } else {
       playerRef.current.cueVideoById(videoId, startAt);
     }
-    // Capture duration for the newly loaded video after a short delay
-    // (the YT player may not report it immediately after cue/load).
     setTimeout(() => captureRealDuration(), 1500);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoId, playerReady, captureRealDuration]);
 
-  // Apply playback_state / position from the room — this fires for host and
-  // listeners alike, since the hub broadcasts SYNC_PLAYBACK/CHANGE_STATE back
-  // to the sender too. Single source of truth, same pattern as the track
-  // queue: nobody drives the player from their own click directly.
   useEffect(() => {
     if (!playerReady || !playerRef.current || !room) return;
 
@@ -343,12 +338,16 @@ export default function PlayerStage() {
     const current = playerRef.current.getCurrentTime?.() ?? 0;
     const totalDuration = playerRef.current.getDuration?.() ?? 0;
 
-    // Avoid jumping backwards if the song naturally finished playing
     const isAtEnd = totalDuration > 0 && Math.abs(current - totalDuration) < 2.5;
 
     if (Math.abs(current - targetSec) > SYNC_DRIFT_THRESHOLD_SEC) {
       if (!(room.playback_state === "paused" && isAtEnd && targetSec < current)) {
         playerRef.current.seekTo(targetSec, true);
+        setIsSyncing(true);
+        if (syncIndicatorTimeoutRef.current) clearTimeout(syncIndicatorTimeoutRef.current);
+        syncIndicatorTimeoutRef.current = setTimeout(() => {
+          setIsSyncing(false);
+        }, SYNC_INDICATOR_DURATION_MS);
       }
     }
 
@@ -360,9 +359,6 @@ export default function PlayerStage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.playback_state, room?.playback_position_ms, playerReady]);
 
-  // Apply mute state independently of whether a player currently exists —
-  // fixes the volume button doing nothing when the queue is empty. Runs
-  // again once the player becomes ready so an earlier click still applies.
   useEffect(() => {
     if (!playerRef.current || !playerReady) return;
     if (isMuted) {
@@ -372,8 +368,6 @@ export default function PlayerStage() {
     }
   }, [isMuted, playerReady]);
 
-  // Local progress bar ticker (visual only, not synced). Paused while the
-  // user is dragging the seek handle so it doesn't fight the drag.
   useEffect(() => {
     const id = setInterval(() => {
       if (isDragging) return;
@@ -384,8 +378,6 @@ export default function PlayerStage() {
     return () => clearInterval(id);
   }, [isDragging]);
 
-  // Host heartbeat: re-broadcast position every few seconds while playing so
-  // listeners correct for drift over time.
   useEffect(() => {
     if (!isHost || room?.playback_state !== "playing") return;
 
@@ -404,7 +396,6 @@ export default function PlayerStage() {
     return () => clearInterval(id);
   }, [isHost, room?.playback_state, send]);
 
-  // Parse LRC lyrics for current track
   const parsedLyrics = useMemo(() => {
     return parseLRC(currentTrack?.lyrics || "");
   }, [currentTrack?.lyrics]);
@@ -413,7 +404,6 @@ export default function PlayerStage() {
     return parsedLyrics.some((l) => l.time >= 0);
   }, [parsedLyrics]);
 
-  // Find active lyric index
   const activeLyricIndex = useMemo(() => {
     if (!isSyncedLyrics || parsedLyrics.length === 0) return -1;
     let activeIdx = -1;
@@ -452,9 +442,6 @@ export default function PlayerStage() {
     });
   };
 
-  // Resolves what "next" means given current shuffle state. `direction`
-  // only really matters when not shuffled — shuffle always picks a random
-  // track other than the current one for "next".
   const getNextTrackId = (direction: 1 | -1): string | null => {
     const list = tracksRef.current;
     if (list.length === 0) return null;
@@ -473,9 +460,6 @@ export default function PlayerStage() {
     return list[nextIdx]?.id ?? null;
   };
 
-  // Keep the "what happens when a track ends" logic in a ref so the YT
-  // player's onStateChange (registered once per video) always calls the
-  // latest version instead of a stale closure.
   useEffect(() => {
     advanceOnEndRef.current = () => {
       if (!isHost) return;
@@ -566,12 +550,11 @@ export default function PlayerStage() {
   const currentSec = isDragging && dragPct !== null
     ? (dragPct / 100) * durationSec
     : durationSec > 0
-    ? Math.min(localPosition, durationSec)
-    : localPosition;
+      ? Math.min(localPosition, durationSec)
+      : localPosition;
   const livePct = durationSec > 0 ? Math.min(100, (currentSec / durationSec) * 100) : 0;
   const progressPct = dragPct ?? livePct;
 
-  // --- Seek bar drag handling ---
   const pctFromPointer = (clientX: number): number => {
     const bar = progressBarRef.current;
     if (!bar) return 0;
@@ -616,10 +599,8 @@ export default function PlayerStage() {
 
   return (
     <main className="col-span-12 lg:col-span-7 flex flex-col justify-between p-space-lg lg:px-space-2xl lg:py-space-lg h-full min-h-0">
-      {/* Hidden — audio-only, no visible video needed */}
       <div id="yt-player-container" className="w-0 h-0 overflow-hidden" />
 
-      {/* Track Header */}
       <div className="shrink-0 flex items-center justify-between gap-space-md pb-space-md border-b border-[#E5DDD3]">
         <div className="flex items-center gap-space-md text-left">
           <div className="w-12 h-12 lg:w-14 lg:h-14 rounded-lg overflow-hidden shrink-0 bg-[#EAE1D7] flex items-center justify-center">
@@ -644,9 +625,20 @@ export default function PlayerStage() {
             </p>
           </div>
         </div>
+
+        {currentTrack && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${isSyncing ? "bg-[#EE5522] animate-pulse" : "bg-[#4CAF50]"
+                }`}
+            />
+            <span className="font-label-sm text-[11px] text-[#7A7672]">
+              {isSyncing ? "Syncing…" : "Synced"}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Center Lyric Stage: Spotify-style, left-aligned, prominent font size */}
       <section className="flex-1 min-h-0 flex flex-col items-start justify-center text-left px-space-md max-w-[760px] w-full mx-auto overflow-hidden relative">
         {currentTrack && parsedLyrics.length > 0 ? (
           <div
@@ -685,10 +677,10 @@ export default function PlayerStage() {
                           <span
                             key={wIdx}
                             className={`transition-colors duration-150 ${isActive
-                                ? isWordSung
-                                  ? "text-[#262422] font-bold"
-                                  : "text-[#7A7672]/30 font-medium"
-                                : ""
+                              ? isWordSung
+                                ? "text-[#262422] font-bold"
+                                : "text-[#7A7672]/30 font-medium"
+                              : ""
                               }`}
                           >
                             {w.text}
@@ -742,7 +734,6 @@ export default function PlayerStage() {
         )}
       </section>
 
-      {/* Playback Console */}
       <div className="shrink-0 pt-space-md border-t border-[#E5DDD3] flex flex-col gap-space-sm">
         <div className="w-full flex flex-col gap-space-2xs">
           <div
@@ -766,7 +757,6 @@ export default function PlayerStage() {
         </div>
 
         <div className="relative flex items-center justify-center">
-          {/* Controls row */}
           <div className="flex items-center justify-center gap-space-sm lg:gap-space-lg">
             <button
               className={`transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${isShuffled ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
@@ -825,7 +815,6 @@ export default function PlayerStage() {
             </button>
           </div>
 
-          {/* Volume button: positioned right below duration */}
           <div className="absolute right-0 flex items-center">
             <button
               onClick={toggleMute}

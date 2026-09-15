@@ -11,7 +11,16 @@ interface RoomMembersProps {
   roomCode: string;
   currentHostId?: string;
   hostLatencyMs: number | null;
+  myLatencyMs: number | null;
   leaveRoom: () => void;
+}
+
+function latencyBadgeClass(ms: number) {
+  return ms < 100
+    ? "bg-green-100 text-green-700"
+    : ms < 300
+      ? "bg-yellow-100 text-yellow-700"
+      : "bg-red-100 text-red-700";
 }
 
 export default function RoomMembers({
@@ -19,6 +28,7 @@ export default function RoomMembers({
   roomCode,
   currentHostId,
   hostLatencyMs,
+  myLatencyMs,
   leaveRoom,
 }: RoomMembersProps) {
   const router = useRouter();
@@ -58,13 +68,10 @@ export default function RoomMembers({
               </span>
               {hostLatencyMs !== null && (
                 <span
-                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                    hostLatencyMs < 100
-                      ? "bg-green-100 text-green-700"
-                      : hostLatencyMs < 300
-                      ? "bg-yellow-100 text-yellow-700"
-                      : "bg-red-100 text-red-700"
-                  }`}
+                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${latencyBadgeClass(
+                    hostLatencyMs
+                  )}`}
+                  title="Host latency"
                 >
                   {hostLatencyMs}ms
                 </span>
@@ -118,6 +125,17 @@ export default function RoomMembers({
                     )}
                   </div>
                 </div>
+
+                {isYou && !isHost && myLatencyMs !== null && (
+                  <span
+                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${latencyBadgeClass(
+                      myLatencyMs
+                    )}`}
+                    title="Your latency"
+                  >
+                    {myLatencyMs}ms
+                  </span>
+                )}
               </div>
             );
           })}

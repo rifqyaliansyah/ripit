@@ -6,7 +6,7 @@ import RoomMembers from "@/components/room/RoomMembers";
 import { useRoomSocketContext } from "@/lib/RoomSocketContext";
 
 export default function RoomPage() {
-  const { room, members, hostLatencyMs, leaveRoom } = useRoomSocketContext();
+  const { room, members, hostLatencyMs, myLatencyMs, leaveRoom } = useRoomSocketContext();
 
   return (
     <div className="flex flex-col h-[100dvh] w-full font-body-md overflow-hidden bg-[#FDF6F0] text-[#2B2A27]">
@@ -19,6 +19,7 @@ export default function RoomPage() {
             roomCode={room?.room_code ?? ""}
             currentHostId={room?.host_id}
             hostLatencyMs={hostLatencyMs}
+            myLatencyMs={myLatencyMs}
             leaveRoom={leaveRoom}
           />
         </div>

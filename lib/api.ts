@@ -188,3 +188,9 @@ export async function checkYoutubeUrl(url: string): Promise<YouTubeMetadata> {
         body: JSON.stringify({ url }),
     });
 }
+
+export async function getWsTicket(): Promise<string> {
+    return apiFetch<{ ticket: string }>("/api/v1/ws-ticket", {
+        method: "POST",
+    }).then((data) => data.ticket);
+}

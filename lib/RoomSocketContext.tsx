@@ -15,8 +15,8 @@ interface RoomSocketContextValue {
     send: (message: WSMessage) => void;
     setTrackDuration: (trackId: string, duration: string) => void;
     leaveRoom: () => void;
-    showResumeOverlay: boolean;   
-    showResyncOverlay: boolean;    
+    showResumeOverlay: boolean;
+    showResyncOverlay: boolean;
     clearResumeOverlay: () => void;
     clearResyncOverlay: () => void;
 }
@@ -25,6 +25,8 @@ const RoomSocketContext = createContext<RoomSocketContextValue | null>(null);
 
 const MAX_TICKET_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 10000;
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -71,7 +73,8 @@ export function RoomSocketProvider({
 
     useEffect(() => {
         let cancelled = false;
-        let ws: WebSocket | null = null;
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+        let reconnectAttempt = 0;
 
         const getTicketWithRetry = async (): Promise<string | null> => {
             for (let attempt = 1; attempt <= MAX_TICKET_RETRIES; attempt++) {
@@ -90,7 +93,15 @@ export function RoomSocketProvider({
             return null;
         };
 
-        (async () => {
+        const scheduleReconnect = () => {
+            if (cancelled) return;
+            const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempt, RECONNECT_MAX_DELAY_MS);
+            reconnectAttempt += 1;
+            reconnectTimer = setTimeout(connect, delay);
+        };
+
+        const connect = async () => {
+            if (cancelled) return;
             const token = getToken();
             if (!token) return;
 
@@ -99,11 +110,25 @@ export function RoomSocketProvider({
 
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
             const wsUrl = apiUrl.replace(/^http/, "ws");
-            ws = new WebSocket(`${wsUrl}/ws/rooms/${roomId}?ticket=${ticket}`);
+            const ws = new WebSocket(`${wsUrl}/ws/rooms/${roomId}?ticket=${ticket}`);
             wsRef.current = ws;
 
-            ws.onopen = () => setConnected(true);
-            ws.onclose = () => setConnected(false);
+            ws.onopen = () => {
+                reconnectAttempt = 0;
+                setConnected(true);
+            };
+
+            ws.onclose = () => {
+                setConnected(false);
+                if (wsRef.current === ws) {
+                    wsRef.current = null;
+                }
+                // The server drops a connection for lots of ordinary reasons
+                // (host restarted, a network blip, Chrome throttling a
+                // backgrounded tab) — without this, the client just sits
+                // here forever showing stale room/playback state.
+                scheduleReconnect();
+            };
 
             ws.onmessage = (event) => {
                 const lines: string[] = event.data.split("\n");
@@ -235,9 +260,16 @@ export function RoomSocketProvider({
                             const user = getUser();
                             const isHost = !!(user && roomRef.current && user.id === roomRef.current.host_id);
                             if (isHost) {
-                                wsRef.current?.send(
-                                    JSON.stringify({ type: "HOST_LATENCY", payload: { latency_ms: latency } })
-                                );
+                                const ws = wsRef.current;
+                                if (ws?.readyState === WebSocket.OPEN) {
+                                    try {
+                                        ws.send(
+                                            JSON.stringify({ type: "HOST_LATENCY", payload: { latency_ms: latency } })
+                                        );
+                                    } catch {
+                                        // Same TOCTOU gap as send() above.
+                                    }
+                                }
                             } else {
                                 setMyLatencyMs(latency);
                             }
@@ -251,11 +283,34 @@ export function RoomSocketProvider({
                     }
                 }
             };
-        })();
+        };
+
+        connect();
+
+        // Chrome (and other browsers) can throttle or fully suspend timers
+        // and network handling in a backgrounded tab, which can silently
+        // drop the WebSocket. When the tab comes back to the foreground,
+        // check the connection immediately instead of waiting for the
+        // backoff timer.
+        const handleVisibility = () => {
+            if (document.visibilityState !== "visible" || cancelled) return;
+            const current = wsRef.current;
+            if (!current || current.readyState === WebSocket.CLOSED || current.readyState === WebSocket.CLOSING) {
+                if (reconnectTimer) {
+                    clearTimeout(reconnectTimer);
+                    reconnectTimer = null;
+                }
+                reconnectAttempt = 0;
+                connect();
+            }
+        };
+        document.addEventListener("visibilitychange", handleVisibility);
 
         return () => {
             cancelled = true;
-            ws?.close();
+            document.removeEventListener("visibilitychange", handleVisibility);
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            wsRef.current?.close();
             wsRef.current = null;
         };
     }, [roomId]);
@@ -264,7 +319,13 @@ export function RoomSocketProvider({
         if (!connected) return;
 
         const sendPing = () => {
-            wsRef.current?.send(JSON.stringify({ type: "PING", payload: { sent_at: Date.now() } }));
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            try {
+                ws.send(JSON.stringify({ type: "PING", payload: { sent_at: Date.now() } }));
+            } catch {
+                // Same TOCTOU gap as send() above — safe to drop this tick.
+            }
         };
 
         sendPing();
@@ -274,7 +335,15 @@ export function RoomSocketProvider({
     }, [connected]);
 
     const send = useCallback((message: WSMessage) => {
-        wsRef.current?.send(JSON.stringify(message));
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        try {
+            ws.send(JSON.stringify(message));
+        } catch {
+            // Socket flipped state between the check above and this call
+            // (can happen under rapid reconnects) — safe to drop, the next
+            // reconnect/heartbeat will catch up.
+        }
     }, []);
 
     const leaveRoom = useCallback(() => {

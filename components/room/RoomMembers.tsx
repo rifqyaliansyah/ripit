@@ -62,21 +62,9 @@ export default function RoomMembers({
         {/* Header with Room Code */}
         <div className="pb-space-md border-b border-[#E5DDD3] shrink-0 flex flex-col gap-space-xs">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <span className="font-label-sm text-label-sm text-[#7A7672]">
-                Room Code
-              </span>
-              {hostLatencyMs !== null && (
-                <span
-                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${latencyBadgeClass(
-                    hostLatencyMs
-                  )}`}
-                  title="Host latency"
-                >
-                  {hostLatencyMs}ms
-                </span>
-              )}
-            </div>
+            <span className="font-label-sm text-label-sm text-[#7A7672]">
+              Room Code
+            </span>
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-space-xs">
@@ -107,6 +95,20 @@ export default function RoomMembers({
             const username = m.user?.username || "Unknown";
             const isYou = m.user_id === currentUser?.id;
 
+            // Each row shows the latency that belongs to that specific person:
+            // the host's row shows hostLatencyMs, your own (non-host) row shows myLatencyMs.
+            // No latency is shown for other members since we don't track theirs.
+            const rowLatencyMs = memberIsHost
+              ? hostLatencyMs
+              : isYou
+                ? myLatencyMs
+                : null;
+            const latencyTitle = memberIsHost
+              ? "Host latency"
+              : isYou
+                ? "Your latency"
+                : undefined;
+
             return (
               <div key={m.user_id} className="py-space-md flex items-center justify-between">
                 <div className="flex items-center gap-space-sm">
@@ -126,14 +128,14 @@ export default function RoomMembers({
                   </div>
                 </div>
 
-                {isYou && !isHost && myLatencyMs !== null && (
+                {rowLatencyMs !== null && (
                   <span
                     className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${latencyBadgeClass(
-                      myLatencyMs
+                      rowLatencyMs
                     )}`}
-                    title="Your latency"
+                    title={latencyTitle}
                   >
-                    {myLatencyMs}ms
+                    {rowLatencyMs}ms
                   </span>
                 )}
               </div>

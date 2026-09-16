@@ -15,6 +15,10 @@ interface RoomSocketContextValue {
     send: (message: WSMessage) => void;
     setTrackDuration: (trackId: string, duration: string) => void;
     leaveRoom: () => void;
+    showResumeOverlay: boolean;   
+    showResyncOverlay: boolean;    
+    clearResumeOverlay: () => void;
+    clearResyncOverlay: () => void;
 }
 
 const RoomSocketContext = createContext<RoomSocketContextValue | null>(null);
@@ -47,6 +51,8 @@ export function RoomSocketProvider({
     const [hostLatencyMs, setHostLatencyMs] = useState<number | null>(null);
     const [myLatencyMs, setMyLatencyMs] = useState<number | null>(null);
     const [trackDurationMap, setTrackDurationMap] = useState<Record<string, string>>({});
+    const [showResumeOverlay, setShowResumeOverlay] = useState(false);
+    const [showResyncOverlay, setShowResyncOverlay] = useState(false);
 
     const setTrackDuration = useCallback((trackId: string, duration: string) => {
         setTrackDurationMap((prev) => {
@@ -113,7 +119,21 @@ export function RoomSocketProvider({
                     switch (msg.type) {
                         case "INITIAL_STATE": {
                             const payload = msg.payload as { room: Room };
-                            setRoom(payload.room);
+                            const wasPlaying = payload.room.playback_state === "playing";
+                            const safeRoom: Room = { ...payload.room, playback_state: "paused" };
+
+                            const user = getUser();
+                            const isListener = !!(user && payload.room.host_id !== user.id);
+
+                            if (wasPlaying) {
+                                if (isListener) {
+                                    setShowResyncOverlay(true);
+                                } else {
+                                    setShowResumeOverlay(true);
+                                }
+                            }
+
+                            setRoom(safeRoom);
                             setMembers(payload.room.members || []);
                             setTracks(payload.room.tracks || []);
                             break;
@@ -139,6 +159,11 @@ export function RoomSocketProvider({
                         case "USER_LEFT": {
                             const payload = msg.payload as UserPresencePayload;
                             setMembers((prev) => prev.filter((m) => m.user_id !== payload.user_id));
+                            break;
+                        }
+                        case "PAUSE_ON_DISCONNECT": {
+                            // Host disconnected → show resume overlay to everyone
+                            setShowResumeOverlay(true);
                             break;
                         }
                         case "QUEUE_UPDATED": {
@@ -270,6 +295,10 @@ export function RoomSocketProvider({
                 send,
                 setTrackDuration,
                 leaveRoom,
+                showResumeOverlay,
+                showResyncOverlay,
+                clearResumeOverlay: () => setShowResumeOverlay(false),
+                clearResyncOverlay: () => setShowResyncOverlay(false),
             }}
         >
             {children}

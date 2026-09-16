@@ -122,11 +122,10 @@ const SYNC_INDICATOR_DURATION_MS = 1200;
 type RepeatMode = "off" | "all" | "one";
 
 export default function PlayerStage() {
-  const { room, tracks, send, setTrackDuration } = useRoomSocketContext();
+  const { room, tracks, send, setTrackDuration, showResumeOverlay, showResyncOverlay, clearResumeOverlay, clearResyncOverlay } = useRoomSocketContext();
   const [apiReady, setApiReady] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [localPosition, setLocalPosition] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragPct, setDragPct] = useState<number | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -145,6 +144,11 @@ export default function PlayerStage() {
 
   const repeatMode: RepeatMode = (room?.repeat_mode as RepeatMode) ?? "off";
   const isShuffled = room?.is_shuffled ?? false;
+
+  const [isMuted, setIsMuted] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("ripit_muted") === "true";
+  });
 
   const updatePlaybackSettings = (next: { repeat_mode?: RepeatMode; is_shuffled?: boolean }) => {
     send({
@@ -542,7 +546,13 @@ export default function PlayerStage() {
   };
 
   const toggleMute = () => {
-    setIsMuted((prev) => !prev);
+    setIsMuted((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        localStorage.setItem("ripit_muted", String(next));
+      }
+      return next;
+    });
   };
 
   const isPlaying = room?.playback_state === "playing";
@@ -597,9 +607,76 @@ export default function PlayerStage() {
     setDragPct(null);
   };
 
+  const handleResume = () => {
+    clearResumeOverlay();
+    if (isHost) {
+      const positionMs = Math.round((playerRef.current?.getCurrentTime?.() ?? 0) * 1000);
+      send({
+        type: "CHANGE_STATE",
+        payload: { playback_state: "playing", position_ms: positionMs },
+      });
+    } else {
+      if (room?.playback_state === "playing" && playerRef.current) {
+        playerRef.current.playVideo();
+      }
+    }
+  };
+
+  const handleResync = () => {
+    clearResyncOverlay();
+    if (playerRef.current && room?.playback_position_ms !== undefined) {
+      playerRef.current.seekTo(room.playback_position_ms / 1000, true);
+      playerRef.current.playVideo();
+    }
+    send({
+      type: "CHANGE_STATE",
+      payload: { playback_state: "playing", position_ms: room?.playback_position_ms },
+    });
+  };
+
   return (
-    <main className="col-span-12 lg:col-span-7 flex flex-col justify-between p-space-lg lg:px-space-2xl lg:py-space-lg h-full min-h-0">
+    <main className="relative col-span-12 lg:col-span-7 flex flex-col justify-between p-space-lg lg:px-space-2xl lg:py-space-lg h-full min-h-0">
       <div id="yt-player-container" className="w-0 h-0 overflow-hidden" />
+
+      {/* Host disconnected — pause overlay untuk semua */}
+      {showResumeOverlay && (
+        <div
+          onClick={handleResume}
+          className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#FAF7F2]/90 backdrop-blur-sm cursor-pointer select-none"
+        >
+          <div className="flex flex-col items-center gap-space-md text-center px-space-lg">
+            <span className="material-symbols-outlined text-[44px] text-[#7A7672]">
+              wifi_off
+            </span>
+            <div className="flex flex-col items-center gap-space-2xs">
+              <p className="font-headline-md text-[#262422]">Host reconnected</p>
+              <p className="font-body-sm text-[#7A7672] text-sm">
+                Click anywhere to continue playing
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Listener sendiri yang refresh — resync overlay hanya untuk dia */}
+      {showResyncOverlay && (
+        <div
+          onClick={handleResync}
+          className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#FAF7F2]/90 backdrop-blur-sm cursor-pointer select-none"
+        >
+          <div className="flex flex-col items-center gap-space-md text-center px-space-lg">
+            <span className="material-symbols-outlined text-[44px] text-[#7A7672]">
+              sync
+            </span>
+            <div className="flex flex-col items-center gap-space-2xs">
+              <p className="font-headline-md text-[#262422]">You're back</p>
+              <p className="font-body-sm text-[#7A7672] text-sm">
+                Click anywhere to resync and keep listening
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="shrink-0 flex items-center justify-between gap-space-md pb-space-md border-b border-[#E5DDD3]">
         <div className="flex items-center gap-space-md text-left">

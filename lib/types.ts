@@ -78,7 +78,8 @@ export type WSEventType =
     | "ERROR"
     | "PING"
     | "PONG"
-    | "HOST_LATENCY";
+    | "HOST_LATENCY"
+    | "PAUSE_ON_DISCONNECT";
 
 export interface WSMessage<T = unknown> {
     type: WSEventType;

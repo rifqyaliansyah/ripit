@@ -736,14 +736,15 @@ export default function PlayerStage() {
                   key={`${idx}-${line.time}`}
                   ref={isActive ? activeLyricRef : null}
                   onClick={() => handleLyricClick(line.time)}
-                  className={`font-headline-md text-headline-md lg:text-headline-lg select-none transition-all duration-300 text-left ${line.time >= 0 ? "cursor-pointer" : ""
+                  style={{ fontWeight: 800 }}
+                  className={`select-none transition-all duration-300 text-left font-black font-headline-md text-headline-md lg:text-headline-lg ${line.time >= 0 ? "cursor-pointer" : ""
                     } ${!isSyncedLyrics
-                      ? "text-[#262422] font-medium"
+                      ? "text-[#262422]"
                       : isActive
-                        ? "text-[#262422] font-bold scale-[1.02] origin-left"
+                        ? "text-[#262422] scale-[1.02] origin-left"
                         : distance === 1
-                          ? "text-[#7A7672]/60 font-medium hover:text-[#262422]"
-                          : "text-[#7A7672]/35 font-medium hover:text-[#262422]"
+                          ? "text-[#7A7672]/60 hover:text-[#262422]"
+                          : "text-[#7A7672]/35 hover:text-[#262422]"
                     }`}
                 >
                   {line.words && line.words.length > 0 ? (
@@ -755,9 +756,9 @@ export default function PlayerStage() {
                             key={wIdx}
                             className={`transition-colors duration-150 ${isActive
                               ? isWordSung
-                                ? "text-[#262422] font-bold"
-                                : "text-[#7A7672]/30 font-medium"
-                              : ""
+                                ? "text-[#262422]"
+                                : "text-[#7A7672]/60" 
+                              : ""  
                               }`}
                           >
                             {w.text}

@@ -692,7 +692,8 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
         </div>
       )}
 
-      <div className="shrink-0 flex items-center justify-between gap-space-md pb-space-md border-b border-[#E5DDD3]">
+      {/* Seamless Header (No bottom border) */}
+      <div className="shrink-0 flex items-center justify-between gap-space-md pb-space-xs">
         <div className="flex items-center gap-space-md text-left">
           <div className="w-12 h-12 lg:w-14 lg:h-14 rounded-lg overflow-hidden shrink-0 bg-[#EAE1D7] flex items-center justify-center">
             {currentTrack?.cover_url ? (
@@ -718,7 +719,7 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
         </div>
 
         {currentTrack && (
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0 px-2.5 py-1 bg-surface-container-low rounded-full border border-[#E5DDD3]/50">
             <span
               className={`w-1.5 h-1.5 rounded-full ${isSyncing ? "bg-[#EE5522] animate-pulse" : "bg-[#4CAF50]"
                 }`}
@@ -736,8 +737,8 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
             ref={lyricsContainerRef}
             className="w-full h-full overflow-y-auto flex flex-col items-start space-y-space-md lg:space-y-space-lg py-space-2xl no-scrollbar scroll-smooth"
             style={{
-              maskImage: "linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)",
-              WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%)",
+              maskImage: "linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)",
+              WebkitMaskImage: "linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%)",
             }}
           >
             <div className="h-[25vh] shrink-0" />
@@ -826,23 +827,24 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
         )}
       </section>
 
-      <div className="shrink-0 pt-space-md border-t border-[#E5DDD3] flex flex-col gap-space-sm">
+      {/* Seamless Floating Controls (No top border) */}
+      <div className="shrink-0 pt-space-xs pb-4 md:pb-0 flex flex-col gap-space-sm">
         <div className="w-full flex flex-col gap-space-2xs">
           <div
             ref={progressBarRef}
-            className={`relative w-full h-[3px] bg-[#E5DDD3] group/bar ${durationSec > 0 && isHost ? "cursor-pointer" : "cursor-default"}`}
+            className={`relative w-full h-[4px] bg-[#EAE1D7] rounded-full group/bar transition-all ${durationSec > 0 && isHost ? "cursor-pointer hover:h-[6px]" : "cursor-default"}`}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
           >
-            <div className="h-full bg-[#EE5522] relative" style={{ width: `${progressPct}%` }}>
+            <div className="h-full bg-[#EE5522] rounded-full relative" style={{ width: `${progressPct}%` }}>
               <div
-                className={`absolute right-0 top-1/2 -translate-y-1/2 rounded-full bg-[#2B2A27] transition-transform ${isDragging ? "scale-125" : ""
-                  } w-2 h-2`}
+                className={`absolute right-0 top-1/2 -translate-y-1/2 rounded-full bg-[#2B2A27] transition-transform shadow-xs ${isDragging ? "scale-125" : "scale-0 group-hover/bar:scale-100"
+                  } w-2.5 h-2.5`}
               ></div>
             </div>
           </div>
-          <div className="w-full flex items-center justify-between font-label-sm text-label-sm text-[#7A7672]">
+          <div className="w-full flex items-center justify-between font-label-sm text-[11px] text-[#7A7672]">
             <span>{formatTime(currentSec)}</span>
             <span>{durationSec > 0 ? formatTime(durationSec) : currentTrack?.duration || "0:00"}</span>
           </div>

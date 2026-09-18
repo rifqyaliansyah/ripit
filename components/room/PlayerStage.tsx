@@ -151,6 +151,7 @@ export default function PlayerStage() {
   });
 
   const updatePlaybackSettings = (next: { repeat_mode?: RepeatMode; is_shuffled?: boolean }) => {
+    if (!isHost) return;
     send({
       type: "PLAYBACK_SETTINGS",
       payload: {
@@ -434,7 +435,7 @@ export default function PlayerStage() {
   }, [activeLyricIndex]);
 
   const handleLyricClick = (lineTime: number) => {
-    if (lineTime < 0 || durationSec <= 0 || !playerRef.current) return;
+    if (!isHost || lineTime < 0 || durationSec <= 0 || !playerRef.current) return;
     playerRef.current.seekTo(lineTime, true);
     setLocalPosition(lineTime);
     send({
@@ -508,6 +509,7 @@ export default function PlayerStage() {
   }, [isHost, repeatMode, isShuffled, tracks, send]);
 
   const handlePlayPause = () => {
+    if (!isHost) return;
     if (!room?.current_track_id) {
       const first = tracks[0];
       if (!first) return;
@@ -531,6 +533,7 @@ export default function PlayerStage() {
   };
 
   const jumpToTrack = (direction: 1 | -1) => {
+    if (!isHost) return;
     if (tracks.length === 0) return;
     const nextId = getNextTrackId(direction);
     if (!nextId) return;
@@ -574,6 +577,7 @@ export default function PlayerStage() {
   };
 
   const seekToPct = (pct: number) => {
+    if (!isHost) return;
     if (!playerRef.current || durationSec <= 0) return;
     const targetSec = (pct / 100) * durationSec;
     playerRef.current.seekTo(targetSec, true);
@@ -588,6 +592,7 @@ export default function PlayerStage() {
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isHost) return;
     if (durationSec <= 0) return;
     setIsDragging(true);
     setDragPct(pctFromPointer(e.clientX));
@@ -816,7 +821,7 @@ export default function PlayerStage() {
         <div className="w-full flex flex-col gap-space-2xs">
           <div
             ref={progressBarRef}
-            className={`relative w-full h-[3px] bg-[#E5DDD3] group/bar ${durationSec > 0 ? "cursor-pointer" : ""}`}
+            className={`relative w-full h-[3px] bg-[#E5DDD3] group/bar ${durationSec > 0 && isHost ? "cursor-pointer" : "cursor-default"}`}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -837,29 +842,33 @@ export default function PlayerStage() {
         <div className="relative flex items-center justify-center">
           <div className="flex items-center justify-center gap-space-sm lg:gap-space-lg">
             <button
-              className={`transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${isShuffled ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
-                }`}
-              title="Shuffle"
+              className={`transition-colors p-space-xs flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${isShuffled ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
+                } ${isHost ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
+              title={isHost ? "Shuffle" : "Only the host can control playback"}
               type="button"
+              disabled={!isHost}
               onClick={() => updatePlaybackSettings({ is_shuffled: !isShuffled })}
             >
               <span className="material-symbols-outlined text-[20px]">shuffle</span>
             </button>
 
             <button
-              className="text-[#2B2A27] hover:text-[#EE5522] transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Previous track"
+              className={`text-[#2B2A27] transition-colors p-space-xs flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${isHost ? "hover:text-[#EE5522] cursor-pointer" : "cursor-not-allowed opacity-50"
+                }`}
+              title={isHost ? "Previous track" : "Only the host can control playback"}
               type="button"
+              disabled={!isHost}
               onClick={() => jumpToTrack(-1)}
             >
               <span className="material-symbols-outlined text-[26px]">skip_previous</span>
             </button>
 
             <button
-              className="text-[#EE5522] hover:opacity-85 transition-opacity p-space-xs flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Play or Pause"
+              className={`text-[#EE5522] transition-opacity p-space-xs flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${isHost ? "hover:opacity-85 cursor-pointer" : "cursor-not-allowed opacity-50"
+                }`}
+              title={isHost ? "Play or Pause" : "Only the host can control playback"}
               type="button"
-              disabled={tracks.length === 0}
+              disabled={tracks.length === 0 || !isHost}
               onClick={handlePlayPause}
             >
               <span className="material-symbols-outlined text-[38px]" style={{ fontVariationSettings: "'FILL' 1" }}>
@@ -868,19 +877,22 @@ export default function PlayerStage() {
             </button>
 
             <button
-              className="text-[#2B2A27] hover:text-[#EE5522] transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
-              title="Next track"
+              className={`text-[#2B2A27] transition-colors p-space-xs flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${isHost ? "hover:text-[#EE5522] cursor-pointer" : "cursor-not-allowed opacity-50"
+                }`}
+              title={isHost ? "Next track" : "Only the host can control playback"}
               type="button"
+              disabled={!isHost}
               onClick={() => jumpToTrack(1)}
             >
               <span className="material-symbols-outlined text-[26px]">skip_next</span>
             </button>
 
             <button
-              className={`transition-colors p-space-xs cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${repeatMode !== "off" ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
-                }`}
-              title={`Repeat: ${repeatMode}`}
+              className={`transition-colors p-space-xs flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed ${repeatMode !== "off" ? "text-[#EE5522]" : "text-[#2B2A27] hover:text-[#EE5522]"
+                } ${isHost ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
+              title={isHost ? `Repeat: ${repeatMode}` : "Only the host can control playback"}
               type="button"
+              disabled={!isHost}
               onClick={() =>
                 updatePlaybackSettings({
                   repeat_mode: repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off",

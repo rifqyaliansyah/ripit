@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from "react";
-import type { WSMessage, UserPresencePayload, Room, RoomMember, Track } from "./types";
+import type { WSMessage, UserPresencePayload, Room, RoomMember, Track, HostChangedPayload } from "./types";
 import { getToken, getUser, getWsTicket } from "./api";
 
 interface RoomSocketContextValue {
@@ -278,6 +278,18 @@ export function RoomSocketProvider({
                         case "HOST_LATENCY": {
                             const payload = msg.payload as { latency_ms: number };
                             setHostLatencyMs(payload.latency_ms);
+                            break;
+                        }
+                        case "HOST_CHANGED": {
+                            const payload = msg.payload as HostChangedPayload;
+                            setRoom((prev) => (prev ? { ...prev, host_id: payload.new_host_id } : prev));
+                            setMembers((prev) =>
+                                prev
+                                    .filter((m) => m.user_id !== payload.old_host_id)
+                                    .map((m) =>
+                                        m.user_id === payload.new_host_id ? { ...m, role: "host" } : m
+                                    )
+                            );
                             break;
                         }
                     }

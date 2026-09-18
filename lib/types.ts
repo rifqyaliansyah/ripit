@@ -17,7 +17,7 @@ export interface Track {
     cover_url: string;
     lyrics?: string;
     has_lyrics: boolean;
-    added_by: string;
+    added_by: string | null;
     sort_order: number;
     created_at: string;
 }
@@ -79,7 +79,8 @@ export type WSEventType =
     | "PING"
     | "PONG"
     | "HOST_LATENCY"
-    | "PAUSE_ON_DISCONNECT";
+    | "PAUSE_ON_DISCONNECT"
+    | "HOST_CHANGED";
 
 export interface WSMessage<T = unknown> {
     type: WSEventType;
@@ -91,4 +92,11 @@ export interface UserPresencePayload {
     username: string;
     avatar_url?: string;
     role: RoomRole;
+}
+
+export interface HostChangedPayload {
+    new_host_id: string;
+    new_host_username: string;
+    old_host_id: string;
+    old_host_username: string;
 }

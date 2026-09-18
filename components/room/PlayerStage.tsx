@@ -539,6 +539,23 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
   const jumpToTrack = (direction: 1 | -1) => {
     if (!isHost) return;
     if (tracks.length === 0) return;
+
+    // If going back and the song has played for more than 3 seconds,
+    // restart the current track from 0:00 instead of skipping to the previous track
+    const current = playerRef.current?.getCurrentTime?.() ?? localPosition;
+    if (direction === -1 && current > 3 && room?.current_track_id) {
+      playerRef.current?.seekTo?.(0, true);
+      setLocalPosition(0);
+      send({
+        type: "CHANGE_STATE",
+        payload: {
+          playback_state: room.playback_state ?? "playing",
+          position_ms: 0,
+        },
+      });
+      return;
+    }
+
     const nextId = getNextTrackId(direction);
     if (!nextId) return;
 
@@ -551,6 +568,55 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
       },
     });
   };
+
+  const handlePlayPauseRef = useRef(handlePlayPause);
+  useEffect(() => {
+    handlePlayPauseRef.current = handlePlayPause;
+  });
+
+  const jumpToTrackRef = useRef(jumpToTrack);
+  useEffect(() => {
+    jumpToTrackRef.current = jumpToTrack;
+  });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in an input, textarea, or contentEditable element
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      // Space -> Toggle Play/Pause
+      if (e.code === "Space" || e.key === " ") {
+        e.preventDefault();
+        handlePlayPauseRef.current();
+        return;
+      }
+
+      // Ctrl + ArrowRight -> Next Track
+      if (e.ctrlKey && (e.key === "ArrowRight" || e.code === "ArrowRight")) {
+        e.preventDefault();
+        jumpToTrackRef.current(1);
+        return;
+      }
+
+      // Ctrl + ArrowLeft -> Previous Track
+      if (e.ctrlKey && (e.key === "ArrowLeft" || e.code === "ArrowLeft")) {
+        e.preventDefault();
+        jumpToTrackRef.current(-1);
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const toggleMute = () => {
     setIsMuted((prev) => {
@@ -718,7 +784,7 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
           </div>
         </div>
 
-        {currentTrack && (
+        {/* {currentTrack && (
           <div className="flex items-center gap-1.5 shrink-0 px-2.5 py-1 bg-surface-container-low rounded-full border border-[#E5DDD3]/50">
             <span
               className={`w-1.5 h-1.5 rounded-full ${isSyncing ? "bg-[#EE5522] animate-pulse" : "bg-[#4CAF50]"
@@ -728,7 +794,7 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
               {isSyncing ? "Syncing…" : "Synced"}
             </span>
           </div>
-        )}
+        )} */}
       </div>
 
       <section className="flex-1 min-h-0 flex flex-col items-start justify-center text-left px-space-md max-w-[760px] w-full mx-auto overflow-hidden relative">
@@ -832,19 +898,19 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
         <div className="w-full flex flex-col gap-space-2xs">
           <div
             ref={progressBarRef}
-            className={`relative w-full h-[4px] bg-[#EAE1D7] rounded-full group/bar transition-all ${durationSec > 0 && isHost ? "cursor-pointer hover:h-[6px]" : "cursor-default"}`}
+            className={`relative w-full h-[3px] bg-[#E5DDD3] group/bar ${durationSec > 0 && isHost ? "cursor-pointer" : "cursor-default"}`}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
           >
-            <div className="h-full bg-[#EE5522] rounded-full relative" style={{ width: `${progressPct}%` }}>
+            <div className="h-full bg-[#EE5522] relative" style={{ width: `${progressPct}%` }}>
               <div
-                className={`absolute right-0 top-1/2 -translate-y-1/2 rounded-full bg-[#2B2A27] transition-transform shadow-xs ${isDragging ? "scale-125" : "scale-0 group-hover/bar:scale-100"
-                  } w-2.5 h-2.5`}
+                className={`absolute right-0 top-1/2 -translate-y-1/2 rounded-full bg-[#2B2A27] transition-transform ${isDragging ? "scale-125" : ""
+                  } w-2 h-2`}
               ></div>
             </div>
           </div>
-          <div className="w-full flex items-center justify-between font-label-sm text-[11px] text-[#7A7672]">
+          <div className="w-full flex items-center justify-between font-label-sm text-label-sm text-[#7A7672]">
             <span>{formatTime(currentSec)}</span>
             <span>{durationSec > 0 ? formatTime(durationSec) : currentTrack?.duration || "0:00"}</span>
           </div>

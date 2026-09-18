@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback, Re
 import type { WSMessage, UserPresencePayload, Room, RoomMember, Track, HostChangedPayload } from "./types";
 import { getToken, getUser, getWsTicket } from "./api";
 
+type ResumeOverlayReason = "self-reconnect" | "host-disconnected" | "host-changed";
+
 interface RoomSocketContextValue {
     room: Room | null;
     members: RoomMember[];
@@ -15,7 +17,7 @@ interface RoomSocketContextValue {
     send: (message: WSMessage) => void;
     setTrackDuration: (trackId: string, duration: string) => void;
     leaveRoom: () => void;
-    showResumeOverlay: boolean;
+    resumeOverlay: ResumeOverlayReason | null;
     showResyncOverlay: boolean;
     clearResumeOverlay: () => void;
     clearResyncOverlay: () => void;
@@ -53,7 +55,7 @@ export function RoomSocketProvider({
     const [hostLatencyMs, setHostLatencyMs] = useState<number | null>(null);
     const [myLatencyMs, setMyLatencyMs] = useState<number | null>(null);
     const [trackDurationMap, setTrackDurationMap] = useState<Record<string, string>>({});
-    const [showResumeOverlay, setShowResumeOverlay] = useState(false);
+    const [resumeOverlay, setResumeOverlay] = useState<ResumeOverlayReason | null>(null);
     const [showResyncOverlay, setShowResyncOverlay] = useState(false);
 
     const setTrackDuration = useCallback((trackId: string, duration: string) => {
@@ -154,7 +156,7 @@ export function RoomSocketProvider({
                                 if (isListener) {
                                     setShowResyncOverlay(true);
                                 } else {
-                                    setShowResumeOverlay(true);
+                                    setResumeOverlay("self-reconnect");
                                 }
                             }
 
@@ -187,8 +189,30 @@ export function RoomSocketProvider({
                             break;
                         }
                         case "PAUSE_ON_DISCONNECT": {
-                            // Host disconnected → show resume overlay to everyone
-                            setShowResumeOverlay(true);
+                            // Host disconnected → show overlay to everyone
+                            setResumeOverlay("host-disconnected");
+                            break;
+                        }
+                        case "HOST_CHANGED": {
+                            const payload = msg.payload as HostChangedPayload;
+                            setRoom((prev) => (prev ? { ...prev, host_id: payload.new_host_id } : prev));
+                            setMembers((prev) =>
+                                prev
+                                    .filter((m) => m.user_id !== payload.old_host_id)
+                                    .map((m) =>
+                                        m.user_id === payload.new_host_id ? { ...m, role: "host" } : m
+                                    )
+                            );
+
+                            const user = getUser();
+                            if (user?.id === payload.new_host_id) {
+                                // If we're the one just promoted and the
+                                // "host disconnected" overlay is still up,
+                                // upgrade it to explain we're the new host
+                                // rather than leaving it pointing at the
+                                // old, now-resolved situation.
+                                setResumeOverlay((prev) => (prev === "host-disconnected" ? "host-changed" : prev));
+                            }
                             break;
                         }
                         case "QUEUE_UPDATED": {
@@ -280,18 +304,6 @@ export function RoomSocketProvider({
                             setHostLatencyMs(payload.latency_ms);
                             break;
                         }
-                        case "HOST_CHANGED": {
-                            const payload = msg.payload as HostChangedPayload;
-                            setRoom((prev) => (prev ? { ...prev, host_id: payload.new_host_id } : prev));
-                            setMembers((prev) =>
-                                prev
-                                    .filter((m) => m.user_id !== payload.old_host_id)
-                                    .map((m) =>
-                                        m.user_id === payload.new_host_id ? { ...m, role: "host" } : m
-                                    )
-                            );
-                            break;
-                        }
                     }
                 }
             };
@@ -376,9 +388,9 @@ export function RoomSocketProvider({
                 send,
                 setTrackDuration,
                 leaveRoom,
-                showResumeOverlay,
+                resumeOverlay,
                 showResyncOverlay,
-                clearResumeOverlay: () => setShowResumeOverlay(false),
+                clearResumeOverlay: () => setResumeOverlay(null),
                 clearResyncOverlay: () => setShowResyncOverlay(false),
             }}
         >

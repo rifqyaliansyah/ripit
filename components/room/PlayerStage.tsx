@@ -122,7 +122,7 @@ const SYNC_INDICATOR_DURATION_MS = 1200;
 type RepeatMode = "off" | "all" | "one";
 
 export default function PlayerStage() {
-  const { room, tracks, send, setTrackDuration, showResumeOverlay, showResyncOverlay, clearResumeOverlay, clearResyncOverlay } = useRoomSocketContext();
+  const { room, tracks, send, setTrackDuration, resumeOverlay, showResyncOverlay, clearResumeOverlay, clearResyncOverlay } = useRoomSocketContext();
   const [apiReady, setApiReady] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [localPosition, setLocalPosition] = useState(0);
@@ -643,8 +643,7 @@ export default function PlayerStage() {
     <main className="relative col-span-12 lg:col-span-7 flex flex-col justify-between p-space-lg lg:px-space-2xl lg:py-space-lg h-full min-h-0">
       <div id="yt-player-container" className="w-0 h-0 overflow-hidden" />
 
-      {/* Host disconnected — pause overlay untuk semua */}
-      {showResumeOverlay && (
+      {resumeOverlay && (
         <div
           onClick={handleResume}
           className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#FAF7F2]/90 backdrop-blur-sm cursor-pointer select-none"
@@ -654,9 +653,15 @@ export default function PlayerStage() {
               wifi_off
             </span>
             <div className="flex flex-col items-center gap-space-2xs">
-              <p className="font-headline-md text-[#262422]">Host reconnected</p>
+              <p className="font-headline-md text-[#262422]">
+                {resumeOverlay === "self-reconnect" && "Welcome back"}
+                {resumeOverlay === "host-disconnected" && "Host disconnected"}
+                {resumeOverlay === "host-changed" && "You're the host now"}
+              </p>
               <p className="font-body-sm text-[#7A7672] text-sm">
-                Click anywhere to continue playing
+                {resumeOverlay === "host-changed"
+                  ? "Click anywhere to resume playback"
+                  : "Click anywhere to continue"}
               </p>
             </div>
           </div>

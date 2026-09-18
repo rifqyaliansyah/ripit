@@ -6,7 +6,11 @@ import { useRoomSocketContext } from "@/lib/RoomSocketContext";
 import { addTrack, updateTrack, deleteTrack, getUser, type AddTrackPayload } from "@/lib/api";
 import type { Track } from "@/lib/types";
 
-export default function TrackQueue() {
+interface TrackQueueProps {
+  className?: string;
+}
+
+export default function TrackQueue({ className = "" }: TrackQueueProps) {
   const { room, tracks, send, trackDurationMap } = useRoomSocketContext();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
@@ -136,7 +140,7 @@ export default function TrackQueue() {
         />
       )}
 
-      <aside className="col-span-12 lg:col-span-3 border-b lg:border-b-0 lg:border-r border-[#E5DDD3] p-space-lg flex flex-col justify-between h-full min-h-0 relative">
+      <aside className={`border-b md:border-b-0 md:border-r border-[#E5DDD3] p-space-md md:p-space-lg flex flex-col justify-between h-full min-h-0 relative ${className}`}>
         <div className="flex flex-col min-h-0 flex-1">
           <div className="flex items-center justify-between pb-space-md shrink-0">
             <h2 className="font-title-sm text-title-sm text-[#2B2A27]">

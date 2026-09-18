@@ -13,6 +13,7 @@ interface RoomMembersProps {
   hostLatencyMs: number | null;
   myLatencyMs: number | null;
   leaveRoom: () => void;
+  className?: string;
 }
 
 function latencyBadgeClass(ms: number) {
@@ -30,6 +31,7 @@ export default function RoomMembers({
   hostLatencyMs,
   myLatencyMs,
   leaveRoom,
+  className = "",
 }: RoomMembersProps) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
@@ -57,7 +59,7 @@ export default function RoomMembers({
   });
 
   return (
-    <aside className="col-span-12 lg:col-span-2 border-t lg:border-t-0 lg:border-l border-[#E5DDD3] p-space-lg flex flex-col justify-between h-full min-h-0">
+    <aside className={`border-t md:border-t-0 md:border-l border-[#E5DDD3] p-space-md md:p-space-lg flex flex-col justify-between h-full min-h-0 ${className}`}>
       <div className="flex flex-col min-h-0 flex-1">
         {/* Header with Room Code */}
         <div className="pb-space-md border-b border-[#E5DDD3] shrink-0 flex flex-col gap-space-xs">
@@ -144,8 +146,8 @@ export default function RoomMembers({
         </div>
       </div>
 
-      {/* Leave button — pinned at the bottom */}
-      <div className="pt-space-md shrink-0">
+      {/* Leave button — pinned at the bottom (desktop/tablet only, mobile uses bottom nav) */}
+      <div className="pt-space-md shrink-0 hidden md:block">
         <button
           type="button"
           onClick={() => setShowLeaveModal(true)}

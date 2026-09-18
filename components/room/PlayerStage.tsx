@@ -120,8 +120,12 @@ const HOST_HEARTBEAT_MS = 4000;
 const SYNC_INDICATOR_DURATION_MS = 1200;
 
 type RepeatMode = "off" | "all" | "one";
+ 
+interface PlayerStageProps {
+  className?: string;
+}
 
-export default function PlayerStage() {
+export default function PlayerStage({ className = "" }: PlayerStageProps) {
   const { room, tracks, send, setTrackDuration, resumeOverlay, showResyncOverlay, clearResumeOverlay, clearResyncOverlay } = useRoomSocketContext();
   const [apiReady, setApiReady] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
@@ -640,7 +644,7 @@ export default function PlayerStage() {
   };
 
   return (
-    <main className="relative col-span-12 lg:col-span-7 flex flex-col justify-between p-space-lg lg:px-space-2xl lg:py-space-lg h-full min-h-0">
+    <div className={`relative flex flex-col justify-between p-space-md md:p-space-lg lg:px-space-2xl lg:py-space-lg h-full min-h-0 ${className}`}>
       <div id="yt-player-container" className="w-0 h-0 overflow-hidden" />
 
       {resumeOverlay && (
@@ -910,10 +914,10 @@ export default function PlayerStage() {
             </button>
           </div>
 
-          <div className="absolute right-0 flex items-center">
+          <div className="absolute right-0 inset-y-0 flex items-center">
             <button
               onClick={toggleMute}
-              className="p-space-xs text-[#7A7672] hover:text-[#2B2A27] transition-colors cursor-pointer"
+              className="p-space-xs text-[#7A7672] hover:text-[#2B2A27] transition-colors cursor-pointer flex items-center justify-center"
               title={isMuted ? "Unmute" : "Mute"}
               type="button"
             >
@@ -924,6 +928,6 @@ export default function PlayerStage() {
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

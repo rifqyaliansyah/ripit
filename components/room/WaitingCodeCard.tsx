@@ -51,7 +51,7 @@ export default function WaitingCodeCard({
         <span className="text-label-md font-label-md text-[#76726D]">
           Your shared room
         </span>
-        {isHost && onRegenerate && (
+        {/* {isHost && onRegenerate && (
           <button
             type="button"
             onClick={onRegenerate}
@@ -61,7 +61,7 @@ export default function WaitingCodeCard({
             <span className="material-symbols-outlined text-[16px]">refresh</span>
             <span>Regenerate</span>
           </button>
-        )}
+        )} */}
       </div>
 
       {/* Room Code Lavender Pill Badge */}

@@ -139,6 +139,8 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
   const roomRef = useRef(room);
   const tracksRef = useRef(tracks);
   const progressBarRef = useRef<HTMLDivElement>(null);
+  const volumeBarRef = useRef<HTMLDivElement>(null);
+  const [isDraggingVolume, setIsDraggingVolume] = useState(false);
   const advanceOnEndRef = useRef<() => void>(() => { });
   const durationSyncedRef = useRef<Set<string>>(new Set());
   const syncIndicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -152,6 +154,15 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
   const [isMuted, setIsMuted] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem("ripit_muted") === "true";
+  });
+  const [volume, setVolume] = useState<number>(() => {
+    if (typeof window === "undefined") return 100;
+    const saved = localStorage.getItem("ripit_volume");
+    if (saved !== null) {
+      const parsed = Number(saved);
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) return parsed;
+    }
+    return 100;
   });
 
   const updatePlaybackSettings = (next: { repeat_mode?: RepeatMode; is_shuffled?: boolean }) => {
@@ -374,8 +385,9 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
       playerRef.current.mute();
     } else {
       playerRef.current.unMute();
+      playerRef.current.setVolume?.(volume);
     }
-  }, [isMuted, playerReady]);
+  }, [isMuted, volume, playerReady]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -618,14 +630,80 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  const handleVolumeChange = (newVolume: number) => {
+    setVolume(newVolume);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ripit_volume", String(newVolume));
+    }
+    if (newVolume === 0) {
+      setIsMuted(true);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("ripit_muted", "true");
+      }
+    } else if (isMuted) {
+      setIsMuted(false);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("ripit_muted", "false");
+      }
+    }
+  };
+
   const toggleMute = () => {
     setIsMuted((prev) => {
       const next = !prev;
       if (typeof window !== "undefined") {
         localStorage.setItem("ripit_muted", String(next));
       }
+      if (!next && volume === 0) {
+        setVolume(50);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("ripit_volume", "50");
+        }
+      }
       return next;
     });
+  };
+
+  const getVolumeIcon = () => {
+    if (isMuted || volume === 0) return "volume_off";
+    if (volume <= 50) return "volume_down";
+    return "volume_up";
+  };
+
+  const getVolPctFromPointer = (clientX: number): number => {
+    const bar = volumeBarRef.current;
+    if (!bar) return 0;
+    const rect = bar.getBoundingClientRect();
+    const x = clientX - rect.left;
+    return Math.min(100, Math.max(0, Math.round((x / rect.width) * 100)));
+  };
+
+  const handleVolumePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    setIsDraggingVolume(true);
+    const newVol = getVolPctFromPointer(e.clientX);
+    handleVolumeChange(newVol);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleVolumePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingVolume) return;
+    const newVol = getVolPctFromPointer(e.clientX);
+    handleVolumeChange(newVol);
+  };
+
+  const handleVolumePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingVolume) return;
+    setIsDraggingVolume(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch { /* ignore */ }
+  };
+
+  const handleVolumeWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 5 : -5;
+    const newVol = Math.min(100, Math.max(0, volume + delta));
+    handleVolumeChange(newVol);
   };
 
   const isPlaying = room?.playback_state === "playing";
@@ -982,17 +1060,43 @@ export default function PlayerStage({ className = "" }: PlayerStageProps) {
             </button>
           </div>
 
-          <div className="absolute right-0 inset-y-0 flex items-center">
+          <div
+            className="absolute right-0 inset-y-0 flex items-center gap-1.5"
+            onWheel={handleVolumeWheel}
+          >
             <button
               onClick={toggleMute}
-              className="p-space-xs text-[#7A7672] hover:text-[#2B2A27] transition-colors cursor-pointer flex items-center justify-center"
-              title={isMuted ? "Unmute" : "Mute"}
+              className="p-1.5 text-[#7A7672] hover:text-[#2B2A27] transition-colors cursor-pointer flex items-center justify-center rounded-full hover:bg-[#EAE1D7]/50"
+              title={isMuted ? "Unmute" : `Mute (${volume}%)`}
               type="button"
             >
               <span className="material-symbols-outlined text-[20px]">
-                {isMuted ? "volume_off" : "volume_up"}
+                {getVolumeIcon()}
               </span>
             </button>
+            <div
+              ref={volumeBarRef}
+              className="relative w-16 sm:w-20 md:w-24 h-5 flex items-center cursor-pointer group/vbar select-none"
+              onPointerDown={handleVolumePointerDown}
+              onPointerMove={handleVolumePointerMove}
+              onPointerUp={handleVolumePointerUp}
+              title={`Volume: ${isMuted ? 0 : volume}%`}
+            >
+              {/* Track */}
+              <div className="w-full h-[4px] bg-[#E5DDD3] rounded-full overflow-hidden relative">
+                <div
+                  className="h-full bg-[#2B2A27] group-hover/vbar:bg-[#EE5522] transition-colors rounded-full"
+                  style={{ width: `${isMuted ? 0 : volume}%` }}
+                />
+              </div>
+              {/* Thumb */}
+              <div
+                className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-[#2B2A27] group-hover/vbar:bg-[#EE5522] shadow-sm transition-transform pointer-events-none ${
+                  isDraggingVolume ? "scale-125 bg-[#EE5522]" : "opacity-0 group-hover/vbar:opacity-100"
+                }`}
+                style={{ left: `${isMuted ? 0 : volume}%` }}
+              />
+            </div>
           </div>
         </div>
       </div>

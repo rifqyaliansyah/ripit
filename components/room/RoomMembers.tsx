@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { RoomMember } from "@/lib/types";
-import { getUser } from "@/lib/api";
+import { getUser, regenerateRoomCode } from "@/lib/api";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 
 interface RoomMembersProps {
   members: RoomMember[];
+  roomId: string;
   roomCode: string;
   currentHostId?: string;
   hostLatencyMs: number | null;
@@ -26,16 +27,18 @@ function latencyBadgeClass(ms: number) {
 
 export default function RoomMembers({
   members,
+  roomId,
   roomCode,
   currentHostId,
   hostLatencyMs,
   myLatencyMs,
   leaveRoom,
-  className = "",
+  className,
 }: RoomMembersProps) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const currentUser = getUser();
 
   const isHost = currentUser?.id === currentHostId;
@@ -44,6 +47,20 @@ export default function RoomMembers({
     navigator.clipboard.writeText(roomCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleRegenerateCode = async () => {
+    if (regenerating) return;
+    setRegenerating(true);
+    try {
+      // room_code updates via the ROOM_CODE_CHANGED WS broadcast — no need
+      // to set state here manually.
+      await regenerateRoomCode(roomId);
+    } catch (err) {
+      console.error("[RegenerateCode] failed:", err);
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   const handleConfirmLeave = () => {
@@ -59,7 +76,7 @@ export default function RoomMembers({
   });
 
   return (
-    <aside className={`border-t md:border-t-0 md:border-l border-[#E5DDD3] p-space-md md:p-space-lg flex flex-col justify-between h-full min-h-0 ${className}`}>
+    <aside className={`border-t lg:border-t-0 lg:border-l border-[#E5DDD3] p-space-lg flex flex-col justify-between h-full min-h-0 ${className ?? ""}`}>
       <div className="flex flex-col min-h-0 flex-1">
         {/* Header with Room Code */}
         <div className="pb-space-md border-b border-[#E5DDD3] shrink-0 flex flex-col gap-space-xs">
@@ -70,19 +87,29 @@ export default function RoomMembers({
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-space-xs">
-              <span className="font-title-sm text-title-sm font-semibold tracking-wider uppercase text-[#2B2A27]">
-                {roomCode}
-              </span>
-              <button
+              <span
                 onClick={handleCopyCode}
-                className="p-1 hover:text-[#EE5522] text-[#7A7672] transition-colors cursor-pointer rounded"
-                title={copied ? "Copied!" : "Copy room code"}
-                type="button"
+                className={`font-title-sm text-title-sm font-semibold tracking-wider uppercase cursor-pointer transition-colors ${copied ? "text-[#4CAF50]" : "text-[#2B2A27] hover:text-[#EE5522]"
+                  }`}
+                title={copied ? "Copied!" : "Click to copy"}
               >
-                <span className="material-symbols-outlined text-[16px]">
-                  {copied ? "check" : "content_copy"}
-                </span>
-              </button>
+                {copied ? "Copied!" : roomCode}
+              </span>
+              {isHost && (
+                <button
+                  onClick={handleRegenerateCode}
+                  disabled={regenerating}
+                  className="p-1 hover:text-[#EE5522] text-[#7A7672] transition-colors cursor-pointer rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Regenerate code"
+                  type="button"
+                >
+                  <span
+                    className={`material-symbols-outlined text-[16px] ${regenerating ? "animate-spin" : ""}`}
+                  >
+                    refresh
+                  </span>
+                </button>
+              )}
             </div>
             <span className="font-label-sm text-[11px] text-[#7A7672]">
               {members.length} {members.length === 1 ? "listener" : "listeners"}
@@ -97,9 +124,6 @@ export default function RoomMembers({
             const username = m.user?.username || "Unknown";
             const isYou = m.user_id === currentUser?.id;
 
-            // Each row shows the latency that belongs to that specific person:
-            // the host's row shows hostLatencyMs, your own (non-host) row shows myLatencyMs.
-            // No latency is shown for other members since we don't track theirs.
             const rowLatencyMs = memberIsHost
               ? hostLatencyMs
               : isYou
@@ -146,8 +170,8 @@ export default function RoomMembers({
         </div>
       </div>
 
-      {/* Leave button — pinned at the bottom (desktop/tablet only, mobile uses bottom nav) */}
-      <div className="pt-space-md shrink-0 hidden md:block">
+      {/* Leave button — pinned at the bottom */}
+      <div className="pt-space-md shrink-0">
         <button
           type="button"
           onClick={() => setShowLeaveModal(true)}

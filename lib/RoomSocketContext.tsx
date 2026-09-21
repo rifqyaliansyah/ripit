@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, useCallback, ReactNode } from "react";
-import type { WSMessage, UserPresencePayload, Room, RoomMember, Track, HostChangedPayload } from "./types";
+import type { WSMessage, UserPresencePayload, Room, RoomMember, Track, HostChangedPayload, RoomCodeChangedPayload } from "./types";
 import { getToken, getUser, getWsTicket } from "./api";
 
 type ResumeOverlayReason = "self-reconnect" | "host-disconnected" | "host-changed";
@@ -276,6 +276,11 @@ export function RoomSocketProvider({
                                     ? { ...prev, repeat_mode: payload.repeat_mode, is_shuffled: payload.is_shuffled }
                                     : prev
                             );
+                            break;
+                        }
+                        case "ROOM_CODE_CHANGED": {
+                            const payload = msg.payload as RoomCodeChangedPayload;
+                            setRoom((prev) => (prev ? { ...prev, room_code: payload.room_code } : prev));
                             break;
                         }
                         case "PONG": {

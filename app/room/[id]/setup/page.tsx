@@ -6,12 +6,13 @@ import WaitingCodeCard from "@/components/room/WaitingCodeCard";
 import WaitingParticipantList from "@/components/room/WaitingParticipantList";
 import ConfirmationModal from "@/components/ui/ConfirmationModal";
 import { useRoomSocketContext } from "@/lib/RoomSocketContext";
-import { getUser } from "@/lib/api";
+import { getUser, regenerateRoomCode } from "@/lib/api";
 
 export default function RoomSetupPage() {
   const router = useRouter();
   const { room, members, send, leaveRoom } = useRoomSocketContext();
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
 
   const currentUser = getUser();
   const isHost = room?.host_id === currentUser?.id;
@@ -36,6 +37,20 @@ export default function RoomSetupPage() {
   const handleStartSession = () => {
     send({ type: "SESSION_STARTED", payload: {} });
     router.push(`/room/${roomCode}`);
+  };
+
+  const handleRegenerateCode = async () => {
+    if (!room || regenerating) return;
+    setRegenerating(true);
+    try {
+      // The room's own code updates via the ROOM_CODE_CHANGED WS broadcast,
+      // so we don't need to manually set state here — just trigger it.
+      await regenerateRoomCode(room.id);
+    } catch (err) {
+      console.error("[RegenerateCode] failed:", err);
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   const handleConfirmLeave = () => {
@@ -65,7 +80,7 @@ export default function RoomSetupPage() {
               <WaitingCodeCard
                 roomCode={roomCode}
                 isHost={isHost}
-                onRegenerate={() => { }}
+                onRegenerate={handleRegenerateCode}
               />
 
               <WaitingParticipantList participants={participants} />

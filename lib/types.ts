@@ -80,7 +80,8 @@ export type WSEventType =
     | "PONG"
     | "HOST_LATENCY"
     | "PAUSE_ON_DISCONNECT"
-    | "HOST_CHANGED";
+    | "HOST_CHANGED"
+    | "ROOM_CODE_CHANGED";
 
 export interface WSMessage<T = unknown> {
     type: WSEventType;
@@ -99,4 +100,8 @@ export interface HostChangedPayload {
     new_host_username: string;
     old_host_id: string;
     old_host_username: string;
+}
+
+export interface RoomCodeChangedPayload {
+    room_code: string;
 }

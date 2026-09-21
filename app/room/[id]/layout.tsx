@@ -18,6 +18,19 @@ function RoomSessionGate({ roomCode }: { roomCode: string }) {
         }
     }, [room?.session_started_at, pathname, roomCode, router]);
 
+    // Keep the browser URL's room code in sync with the room's live code.
+    // Without this, a regenerated code leaves the URL pointing at a code
+    // that no longer exists in the DB — a refresh would then fail to
+    // resolve the room and bounce everyone (host included) back to entry.
+    useEffect(() => {
+        if (!room?.room_code) return;
+        const liveCode = room.room_code.toUpperCase();
+        if (liveCode === roomCode) return;
+
+        const onSetupPage = pathname.endsWith("/setup");
+        router.replace(onSetupPage ? `/room/${liveCode}/setup` : `/room/${liveCode}`);
+    }, [room?.room_code, roomCode, pathname, router]);
+
     return null;
 }
 

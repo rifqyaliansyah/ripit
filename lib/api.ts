@@ -194,3 +194,9 @@ export async function getWsTicket(): Promise<string> {
         method: "POST",
     }).then((data) => data.ticket);
 }
+
+export async function regenerateRoomCode(roomId: string): Promise<Room> {
+    return apiFetch<Room>(`/api/v1/rooms/${roomId}/regenerate-code`, {
+        method: "PUT",
+    });
+}

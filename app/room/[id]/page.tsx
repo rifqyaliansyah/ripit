@@ -49,14 +49,14 @@ export default function RoomPage() {
           {/* Room Members: Fullscreen on mobile when active, col-span-3 on md, 2 on lg */}
           <RoomMembers
             members={members}
+            roomId={room?.id ?? ""}
             roomCode={room?.room_code ?? ""}
             currentHostId={room?.host_id}
             hostLatencyMs={hostLatencyMs}
             myLatencyMs={myLatencyMs}
             leaveRoom={leaveRoom}
-            className={`col-span-12 md:col-span-3 lg:col-span-2 ${
-              mobileTab === "members" ? "flex" : "hidden md:flex"
-            }`}
+            className={`col-span-12 md:col-span-3 lg:col-span-2 ${mobileTab === "members" ? "flex" : "hidden md:flex"
+              }`}
           />
         </div>
 

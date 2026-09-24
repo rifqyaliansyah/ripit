@@ -68,14 +68,12 @@ export function parseLRC(lrcText: string): LyricLine[] {
     const lineMatches = Array.from(trimmed.matchAll(lineTimeRegex));
     if (lineMatches.length > 0) {
       const rawContent = trimmed.replace(lineTimeRegex, "").trim();
-      if (!rawContent) continue;
-
       const hasWordTags = /<(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?>/.test(rawContent);
 
       for (const lm of lineMatches) {
         const lineTime = parseTimestamp(lm[1], lm[2], lm[3]);
         let words: WordSpan[] | undefined = undefined;
-        let cleanText = rawContent;
+        let cleanText = rawContent || "♪";
 
         if (hasWordTags) {
           words = [];
@@ -98,7 +96,7 @@ export function parseLRC(lrcText: string): LyricLine[] {
             }
           }
 
-          cleanText = rawContent.replace(wordTimeRegex, "");
+          cleanText = rawContent.replace(wordTimeRegex, "").trim() || "♪";
         }
 
         result.push({
